@@ -21,10 +21,9 @@
 #include <hardware/hardware.h>
 #include <hardware/sensors.h> /* <-- This is a good place to look! */
 
-#include "accelerationd.h"
+#include "accelerationd.h" /* defined dev_acceleration and TIME_INVERVAL*/
 
 static int effective_linaccel_sensor = -1;
-
 
 /* helper functions which you should use */
 static int open_sensors(struct sensors_module_t **hw_module,
@@ -36,6 +35,8 @@ static int poll_sensor_data(struct sensors_poll_device_t *sensors_device);
 void daemon_mode(void)
 {
 	/* Fill in */
+
+	/* this ref might be helpful: http://www.thegeekstuff.com/2012/02/c-daemon-process/ */
 	return;
 }
 
@@ -63,10 +64,22 @@ int main(int argc, char **argv)
 	enumerate_sensors(sensors_module);
 
 	printf("turn me into a daemon!\n");
+
 	while (1) {
 emulation:
-		poll_sensor_data(sensors_device);
+		errsv = poll_sensor_data(sensors_device);
+		if(errsv != 0) {
+			printf("Error: poll_sensor_data failed.");
+			break;
+		}
 		/* TODO: Define time interval and call usleep */
+
+		int errsl = 0;
+		errsl = usleep(TIME_INTERVAL);
+		if(errsl != 0) {
+			printf("Error: failed to sleep.");
+			break;
+		}
 	}
 
 	return EXIT_SUCCESS;
@@ -85,9 +98,15 @@ static int poll_sensor_data(struct sensors_poll_device_t *sensors_device)
 		 * TODO: You have the acceleration here - 
 		 * scale it and send it to your kernel
 		 */
+
+		/* Judging from the example on website, 
+		 * it seems there is no need to scale in emulator mode*/
+		err = syscall(252, cur_acceleration);
+		if(err)
+			printf("Error: acc_signal failed");
+
 	} else {
-
-
+		/* buffer is an array of 128 sensors_event_t structs */
 		sensors_event_t buffer[128];
 		ssize_t buf_size = sizeof(buffer)/sizeof(buffer[0]);
 		ssize_t count = sensors_device->poll(sensors_device,
@@ -97,8 +116,34 @@ static int poll_sensor_data(struct sensors_poll_device_t *sensors_device)
 		 * TODO: You have the acceleration here - scale it and
 		 * send it to kernel
 		 */
+
+		/* ??? should we cap count by buf_size??? */
+		/* need to find the correct sensor type: accelerometer */
+		/* sensors_event_t->type == SENSOR_TYPE_ACCELEROMETER */
+		/* sensors_event_t->acceleration -> x / y / z */
+
+		/* find the sensors_event_t of type SENSOR_TYPE_ACCELEROMETER */
+		while(count > 0 && buffer[count-1]->type != SENSOR_TYPE_ACCELEROMETER) {
+			count--;
 		}
+
+		if(count < 0) { /* Failed to find accelerometer */
+			err = 1;
+			printf("Failed to find type SENSOR_TYPE_ACCELEROMETER in buffer");
+		} else { /* found type accelerometer */
+			 /* scale the data by 100, convert to int, and send to kernel */
+
+			cur_acceleration->x = (int) ((buffer[count-1]->acceleration->x)*100);
+			cur_acceleration->y = (int) ((buffer[count-1]->acceleration->y)*100);
+			cur_acceleration->z = (int) ((buffer[count-1]->acceleration->z)*100);
+
+			err = syscall(252, cur_acceleration);
+			if(err)
+				printf("Error: acc_signal failed");
+		}
+
 	}
+	//}
 	return err;
 }
 
