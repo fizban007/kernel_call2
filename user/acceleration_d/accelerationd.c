@@ -102,6 +102,9 @@ int main(int argc, char **argv)
 		printf("open_sensors failed\n");
 		return EXIT_FAILURE;
 	}
+
+	/* find the sensor ID for accelerometer 
+	 * and save in "effective_linaccel_sensor" */
 	enumerate_sensors(sensors_module);
 
 	printf("turn me into a daemon!\n");
@@ -159,20 +162,19 @@ static int poll_sensor_data(struct sensors_poll_device_t *sensors_device)
 		 */
 
 		/* ??? should we cap count by buf_size??? */
-		
-		/* need to find the correct sensor type: accelerometer */
+
+		/* find the sensors_event_t of type SENSOR_TYPE_ACCELEROMETER */
 		/* sensors_event_t->type == SENSOR_TYPE_ACCELEROMETER */
 		/* sensors_event_t->acceleration -> x / y / z */
 
-		/* find the sensors_event_t of type SENSOR_TYPE_ACCELEROMETER */
-		while(count > 0 && buffer[count-1]->type != SENSOR_TYPE_ACCELEROMETER) {
+		while(count > 0 && buffer[count-1]->sensor != effective_linaccel_sensor) {
 			count--;
 		}
 
-		if(count < 0) { /* Failed to find accelerometer */
+		if(count < 0) { /* Failed to find event with accelerometer handler # */
 			err = 1;
-			printf("Failed to find type SENSOR_TYPE_ACCELEROMETER in buffer");
-		} else { /* found type accelerometer */
+			printf("Failed to locate sensor using handler in buffer");
+		} else { /* found accelerometer's event*/
 			 /* scale the data by 100, convert to int, and send to kernel */
 
 			cur_acceleration->x = (int) ((buffer[count-1]->acceleration->x)*100);
