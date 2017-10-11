@@ -15,3 +15,6 @@
 		+ accevt_wait.c
 		+ accevt_signal.c
 		+ accevt_destroy.c
+5, Added acceleration.c file in /f17-...-team14/kernel/kernel to combine all of the syscalls
+6, Added acceleration.h file in /f17-.....-team14/kernel/include/linux to combine two header file
+7, change f17-...-team14/kernel/kernel/Makefile: replace various .o with acceleration.o
