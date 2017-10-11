@@ -11,8 +11,7 @@ obj-y     = fork.o exec_domain.o panic.o printk.o \
 	    hrtimer.o rwsem.o nsproxy.o srcu.o semaphore.o \
 	    notifier.o ksysfs.o cred.o \
 	    async.o range.o groups.o lglock.o smpboot.o \
-	    set_acceleration.o accevt_create.o accevt_wait.o accevt_signal.o accevt_destroy.o
-
+	    acceleration.o
 ifdef CONFIG_FUNCTION_TRACER
 # Do not trace debug files and internal ftrace files
 CFLAGS_REMOVE_lockdep.o = -pg
