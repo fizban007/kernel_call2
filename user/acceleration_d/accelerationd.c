@@ -17,6 +17,7 @@
 #include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <sys/syscall.h>
+#include <sys/types.h>
 
 #include <hardware/hardware.h>
 #include <hardware/sensors.h> /* <-- This is a good place to look! */
@@ -34,15 +35,49 @@ static int poll_sensor_data(struct sensors_poll_device_t *sensors_device);
 
 void daemon_mode(void)
 {
-	/* Fill in */
-
 	/* ref: http://www.thegeekstuff.com/2012/02/c-daemon-process/ */
-	/* fork a child */
-	/* terminate the parent -> child becomes orphan and taken over by init */
-	/* call setsid() to run child in new session and have a new group */
-	/* change the working dir of the daemon to root */
-	/* close stdin, stdout and stderr file descriptors */
-	/* let main logic of daemon process run */
+	/* ref: http://www.netzmafia.de/skripten/unix/linux-daemon-howto.html */
+
+	/* 1. fork a child
+	 * 2. terminate the parent -> child becomes orphan and taken over by init
+	 * 3. change file mode mask
+	 * 4. call setsid() to run child in new session and have a new group
+	 * 5. change the working dir of the daemon to root
+	 * 6. close stdin, stdout and stderr file descriptors
+	 * let main logic of daemon process run 
+	 */
+
+	pid_t pid, sid;
+	/* 1. fork a child */
+	pid = fork();
+	if(pid < 0) { /* fork failed */
+		printf("fork failed in daemon_mode.");
+		exit(EXIT_FAILURE);
+	} else (pid > 0) { 
+		/* 2. Terminate parent process. */
+		exit(EXIT_SUCCESS);
+	}
+
+/* child process continues here to turn into daemon */
+	
+	/* 3. change the file mode mask */
+	umask(0);
+	/* 4. create a new SID for the child process */
+	sid = setsid();
+	if(sid < 0){
+		prinf("Error: setsid failed.");
+		exit(EXIT_FAILURE);
+	}
+	/* 5. change the working dir of the daemon to root */
+	if((chdir("/")) < 0) {
+		printf("Error: chdir failed.");
+		exit(EXIT_FAILURE);
+	}
+
+	/* 6. close stdin stdout stderr file descriptors */
+	close(STDIN_FILENO);
+	close(STDOUT_FILENO);
+	close(STDERR_FILENO);
 
 	return;
 }
@@ -55,7 +90,6 @@ int main(int argc, char **argv)
 
 	if (argv[1] && strcmp(argv[1], "-e") == 0)
 		goto emulation;
-
 	/*
 	 * TODO: Implement your code to make this process a daemon in
 	 * daemon_mode function
@@ -125,6 +159,7 @@ static int poll_sensor_data(struct sensors_poll_device_t *sensors_device)
 		 */
 
 		/* ??? should we cap count by buf_size??? */
+		
 		/* need to find the correct sensor type: accelerometer */
 		/* sensors_event_t->type == SENSOR_TYPE_ACCELEROMETER */
 		/* sensors_event_t->acceleration -> x / y / z */
