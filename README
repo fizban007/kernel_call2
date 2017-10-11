@@ -1,3 +1,17 @@
-1, Added syscall 249 to 253 in the syscall table:
-
+1, Updated syscall table in unistd.h:
 	/f17-hmwk3-team14/kernel/include/uapi/asm-generic/unistd.h
+2, Updated syscalls.h:
+	/f17-hmwk3-team14/kernel/include/linux/syscalls.h
+		+ structs at line 67-68
+		+ asmlinkages at line 864-869
+3, Added two headerfiles for structs:
+	/f17-hmwk3-team14/kernel/include/linux
+		+ acc_motion.h
+		+ dev_acceleration.h
+4, Added system call .c files:
+	/f17-hmwk3-team14/kernel/kernel
+		+ set_acceleration.c
+		+ accevt_create.c
+		+ accevt_wait.c
+		+ accevt_signal.c
+		+ accevt_destroy.c
