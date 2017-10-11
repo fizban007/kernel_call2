@@ -36,7 +36,14 @@ void daemon_mode(void)
 {
 	/* Fill in */
 
-	/* this ref might be helpful: http://www.thegeekstuff.com/2012/02/c-daemon-process/ */
+	/* ref: http://www.thegeekstuff.com/2012/02/c-daemon-process/ */
+	/* fork a child */
+	/* terminate the parent -> child becomes orphan and taken over by init */
+	/* call setsid() to run child in new session and have a new group */
+	/* change the working dir of the daemon to root */
+	/* close stdin, stdout and stderr file descriptors */
+	/* let main logic of daemon process run */
+
 	return;
 }
 
