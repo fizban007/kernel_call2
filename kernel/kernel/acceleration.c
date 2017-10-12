@@ -14,9 +14,9 @@ int set_acceleration(struct dev_acceleration __user *acceleration)
 	if (res != 0)
 		return -EFAULT;
 
-	printk("detected x-axis: %d", k_acceleration->x);
-	printk("detected y-axis: %d", k_acceleration->y);
-	printk("detected z-axis: %d", k_acceleration->z);
+	printk("detected x-axis: %d\n", k_acceleration->x);
+	printk("detected y-axis: %d\n", k_acceleration->y);
+	printk("detected z-axis: %d\n", k_acceleration->z);
 	kfree(k_acceleration);
 	return 0;
 }

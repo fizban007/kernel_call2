@@ -51,7 +51,7 @@ void daemon_mode(void)
 	/* 1. fork a child */
 	pid = fork();
 	if(pid < 0) { /* fork failed */
-		printf("fork failed in daemon_mode.");
+		printf("fork failed in daemon_mode.\n");
 		exit(EXIT_FAILURE);
 	} else if (pid > 0) { 
 		/* 2. Terminate parent process. */
@@ -120,10 +120,10 @@ emulation:
 		int errsl = 0;
 		errsl = usleep(TIME_INTERVAL);
 		if(errsl != 0) {
-			printf("Error: failed to sleep.");
+			printf("Error: failed to sleep.\n");
 			break;
 		}
-		printf("slept for: %d ms", TIME_INTERVAL);
+		printf("slept for: %d ms\n", TIME_INTERVAL);
 		break; /* to test 249 only */
 	}
 
@@ -180,7 +180,7 @@ static int poll_sensor_data(struct sensors_poll_device_t *sensors_device)
 
 		if(count < 0) { /* Failed to find event with accelerometer handler # */
 			err = 1;
-			printf("Failed to locate sensor using handler in buffer");
+			printf("Failed to locate sensor using handler in buffer\n");
 		} else { /* found accelerometer's event*/
 			 /* scale the data by 100, convert to int, and send to kernel */
 			cur_acceleration->x = (int) ((buffer[count-1].acceleration.x)*100);
@@ -189,7 +189,7 @@ static int poll_sensor_data(struct sensors_poll_device_t *sensors_device)
 			
 			err = syscall(252, cur_acceleration);
 			if(err)
-				printf("Error: acc_signal failed");
+				printf("Error: accevt_signal failed\n");
 		}
 
 	}
