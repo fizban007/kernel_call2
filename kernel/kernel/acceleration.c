@@ -4,8 +4,11 @@
 #include <linux/uaccess.h>
 #include <linux/slab.h>
 #include <linux/spinlock.h>
+#include <linux/kernel.h>
 
 #define WINDOW 20
+#define NOISE 10
+/*https://www.linuxquestions.org/questions/programming-9/mtx_os-c-35-37-error-%91spin_lock_unlocked%92-undeclared-here-not-in-a-function-4175468757/*/
 static DEFINE_SPINLOCK(acceleration_xyz_lock);
 static DEFINE_SPINLOCK(motion_lock);
 struct acceleration_xyz {
@@ -46,15 +49,32 @@ int set_acceleration(struct dev_acceleration __user *acceleration)
 }
 
 int check_window(struct acceleration_xyz *head, struct motion *ptr) {
-/*	struct acceleration_xyz *sensor_data;
-	if (head == NULL)
+	struct acceleration_xyz *sensor, *sensor_next;
+	unsigned int x;
+	unsigned int y;
+	unsigned int z;
+	unsigned int frequency = 0;
+
+	if (head == NULL || head != NULL)
 		return 0;
-	sensor_data = head;
-	while(sensor_data != NULL) {
-		
-	}*/
-	return 1;
-	
+	sensor = head;
+	sensor_next = head->next;
+	while(sensor_next != NULL) {
+		x = abs(sensor_next->xyz->x - sensor->xyz->x);
+		y = abs(sensor_next->xyz->y - sensor->xyz->y);
+		z = abs(sensor_next->xyz->z - sensor->xyz->z);
+		if (x >= ptr->baseline->dlt_x 
+			&& y >= ptr->baseline->dlt_y &&
+			z >= ptr->baseline->dlt_z 
+			&& x + y + z > NOISE) {
+			frequency++;
+		}
+		sensor = sensor_next;
+		sensor_next = sensor->next;
+	}
+	if (frequency >= ptr->baseline->frq)
+		return 1;
+	return 0;
 }
 int accevt_destroy(int event_id)
 {
@@ -156,6 +176,9 @@ int accevt_signal(struct dev_acceleration __user *acceleration)
 		ptr = head_motion;
 		while(ptr != NULL) {
 			res = check_window(head, ptr);
+			if ( res == 1) {
+				/* invoke signal */
+			}
 			ptr = ptr->next;
 		}
 	}
