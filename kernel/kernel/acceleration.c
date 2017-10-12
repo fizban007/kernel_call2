@@ -5,12 +5,16 @@
 #include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <linux/kernel.h>
+#include <linux/wait.h>
 
 #define WINDOW 20
 #define NOISE 10
 /*https://www.linuxquestions.org/questions/programming-9/mtx_os-c-35-37-error-%91spin_lock_unlocked%92-undeclared-here-not-in-a-function-4175468757/*/
 static DEFINE_SPINLOCK(acceleration_xyz_lock);
-static DEFINE_SPINLOCK(motion_lock);
+static DEFINE_SPINLOCK(event_lock);
+/*http://tuxthink.blogspot.com/2011/04/wait-queues.html*/
+DECLARE_WAIT_QUEUE_HEAD(process);
+
 struct acceleration_xyz {
 	struct dev_acceleration *xyz;
 	struct acceleration_xyz *next;
@@ -20,14 +24,14 @@ struct acceleration_xyz *head = NULL;
 struct acceleration_xyz *tail = NULL;
 int xyz_len = 0;
 
-struct motion {
+struct event {
 	struct acc_motion *baseline;
-	int e_id;
-	struct motion *next;
+	int id;
+	struct event *next;
 };
 
-struct motion *head_motion = NULL;
-struct motion *tail_motion = NULL;
+struct event *head_event = NULL;
+struct event *tail_event = NULL;
 int num_event = 0;
 
 int set_acceleration(struct dev_acceleration __user *acceleration)
@@ -48,11 +52,10 @@ int set_acceleration(struct dev_acceleration __user *acceleration)
 	return 0;
 }
 
-int check_window(struct acceleration_xyz *head, struct motion *ptr) {
+int check_window(struct acceleration_xyz *head, struct event *ptr) {
 	struct acceleration_xyz *sensor, *sensor_next;
-	unsigned int x;
-	unsigned int y;
-	unsigned int z;
+	unsigned int x = 0, y = 0, z = 0;
+	unsigned int delta_x, delta_y, delta_z;
 	unsigned int frequency = 0;
 
 	if (head == NULL || head != NULL)
@@ -60,19 +63,20 @@ int check_window(struct acceleration_xyz *head, struct motion *ptr) {
 	sensor = head;
 	sensor_next = head->next;
 	while(sensor_next != NULL) {
-		x = abs(sensor_next->xyz->x - sensor->xyz->x);
-		y = abs(sensor_next->xyz->y - sensor->xyz->y);
-		z = abs(sensor_next->xyz->z - sensor->xyz->z);
-		if (x >= ptr->baseline->dlt_x 
-			&& y >= ptr->baseline->dlt_y &&
-			z >= ptr->baseline->dlt_z 
-			&& x + y + z > NOISE) {
+		delta_x = abs(sensor_next->xyz->x - sensor->xyz->x);
+		delta_y = abs(sensor_next->xyz->y - sensor->xyz->y);
+		delta_z = abs(sensor_next->xyz->z - sensor->xyz->z);
+		x += delta_x;
+		y += delta_y;
+		z += delta_z;
+		if (delta_x + delta_y + delta_z > NOISE) {
 			frequency++;
 		}
 		sensor = sensor_next;
 		sensor_next = sensor->next;
 	}
-	if (frequency >= ptr->baseline->frq)
+	if (frequency >= ptr->baseline->frq && x >= ptr->baseline->dlt_x
+		&& y >= ptr->baseline->dlt_y && z >= ptr->baseline->dlt_z)
 		return 1;
 	return 0;
 }
@@ -93,23 +97,23 @@ int accevt_create(struct acc_motion __user *acceleration)
 		return -EFAULT;
 	if(k_acce->frq > WINDOW)
 		k_acce->frq = WINDOW;
-	spin_lock(&motion_lock);
+	spin_lock(&event_lock);
 	num_event++;
-	if (head_motion == NULL) {
-		head_motion = kmalloc(sizeof(struct motion), GFP_KERNEL);
-		head_motion->next = NULL;
-		head_motion->e_id = num_event;
-		head_motion->baseline = k_acce;
-		tail_motion = head_motion;
+	if (head_event == NULL) {
+		head_event = kmalloc(sizeof(struct event), GFP_KERNEL);
+		head_event->next = NULL;
+		head_event->e_id = num_event;
+		head_event->baseline = k_acce;
+		tail_event = head_event;
 	} else {
-		tail_motion->next = kmalloc(sizeof(struct motion), 
+		tail_event->next = kmalloc(sizeof(struct event), 
 					GFP_KERNEL);
-		tail_motion = tail_motion->next;
-		tail_motion->next = NULL;
-		tail_motion->e_id = num_event;
-		tail_motion->baseline = k_acce;
+		tail_event = tail_event->next;
+		tail_event->next = NULL;
+		tail_event->e_id = num_event;
+		tail_event->baseline = k_acce;
 	}
-	spin_unlock(&motion_lock);
+	spin_unlock(&event_lock);
 	
 	return 0;
 }
@@ -123,7 +127,7 @@ int accevt_signal(struct dev_acceleration __user *acceleration)
 	int res;
 	struct dev_acceleration *k_acce;
 	struct acceleration_xyz *temp;
-	struct motion *ptr;
+	struct event *ptr;
 
 	k_acce = kmalloc(sizeof(struct dev_acceleration), GFP_KERNEL);
 	res = copy_from_user(k_acce, acceleration,
@@ -168,12 +172,12 @@ int accevt_signal(struct dev_acceleration __user *acceleration)
 	}
 
 
-	/* check if some event happen when the motion list is not empty 
-	 * loop each motion struct, call the check_window() function
+	/* check if some event happen when the event list is not empty 
+	 * loop each event struct, call the check_window() function
 	 * return 1 if a event should happen else return 0 
 	 */
-	if (head_motion != NULL) {
-		ptr = head_motion;
+	if (head_event != NULL) {
+		ptr = head_event;
 		while(ptr != NULL) {
 			res = check_window(head, ptr);
 			if ( res == 1) {
