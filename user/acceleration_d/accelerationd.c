@@ -53,7 +53,7 @@ void daemon_mode(void)
 	if(pid < 0) { /* fork failed */
 		printf("fork failed in daemon_mode.");
 		exit(EXIT_FAILURE);
-	} else (pid > 0) { 
+	} else if (pid > 0) { 
 		/* 2. Terminate parent process. */
 		exit(EXIT_SUCCESS);
 	}
@@ -65,7 +65,7 @@ void daemon_mode(void)
 	/* 4. create a new SID for the child process */
 	sid = setsid();
 	if(sid < 0){
-		prinf("Error: setsid failed.");
+		printf("Error: setsid failed.");
 		exit(EXIT_FAILURE);
 	}
 	/* 5. change the working dir of the daemon to root */
@@ -73,7 +73,6 @@ void daemon_mode(void)
 		printf("Error: chdir failed.");
 		exit(EXIT_FAILURE);
 	}
-
 	/* 6. close stdin stdout stderr file descriptors */
 	close(STDIN_FILENO);
 	close(STDOUT_FILENO);
@@ -113,7 +112,7 @@ int main(int argc, char **argv)
 emulation:
 		errsv = poll_sensor_data(sensors_device);
 		if(errsv != 0) {
-			printf("Error: poll_sensor_data failed.");
+			printf("Error: poll_sensor_data failed.\n");
 			break;
 		}
 		/* TODO: Define time interval and call usleep */
@@ -124,6 +123,8 @@ emulation:
 			printf("Error: failed to sleep.");
 			break;
 		}
+		printf("slept for: %d ms", TIME_INTERVAL);
+		break; /* to test 249 only */
 	}
 
 	return EXIT_SUCCESS;
@@ -142,12 +143,18 @@ static int poll_sensor_data(struct sensors_poll_device_t *sensors_device)
 		 * TODO: You have the acceleration here - 
 		 * scale it and send it to your kernel
 		 */
-
-		/* Judging from the example on website, 
-		 * it seems there is no need to scale in emulator mode*/
-		err = syscall(252, cur_acceleration);
-		if(err)
-			printf("Error: acc_signal failed");
+		
+		printf("line 147 reached.\n");
+		printf("cur_acceleration->x: %d\n", cur_acceleration->x);
+		printf("cur_acceleration->y: %d\n", cur_acceleration->y);
+		printf("cur_acceleration->z: %d\n", cur_acceleration->z);
+	
+		/* err = syscall(252, cur_acceleration);*/
+		err = syscall(249, cur_acceleration);
+		if(err){
+			/*printf("Error: accevt_signal failed.\n");*/
+			printf("Error: set_acceleration failed.\n");
+		}
 
 	} else {
 		/* buffer is an array of 128 sensors_event_t structs */
@@ -167,7 +174,7 @@ static int poll_sensor_data(struct sensors_poll_device_t *sensors_device)
 		/* sensors_event_t->type == SENSOR_TYPE_ACCELEROMETER */
 		/* sensors_event_t->acceleration -> x / y / z */
 
-		while(count > 0 && buffer[count-1]->sensor != effective_linaccel_sensor) {
+		while(count > 0 && buffer[count-1].sensor != effective_linaccel_sensor) {
 			count--;
 		}
 
@@ -176,11 +183,10 @@ static int poll_sensor_data(struct sensors_poll_device_t *sensors_device)
 			printf("Failed to locate sensor using handler in buffer");
 		} else { /* found accelerometer's event*/
 			 /* scale the data by 100, convert to int, and send to kernel */
-
-			cur_acceleration->x = (int) ((buffer[count-1]->acceleration->x)*100);
-			cur_acceleration->y = (int) ((buffer[count-1]->acceleration->y)*100);
-			cur_acceleration->z = (int) ((buffer[count-1]->acceleration->z)*100);
-
+			cur_acceleration->x = (int) ((buffer[count-1].acceleration.x)*100);
+			cur_acceleration->y = (int) ((buffer[count-1].acceleration.y)*100);
+			cur_acceleration->z = (int) ((buffer[count-1].acceleration.z)*100);
+			
 			err = syscall(252, cur_acceleration);
 			if(err)
 				printf("Error: acc_signal failed");
