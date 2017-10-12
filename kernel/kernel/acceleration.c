@@ -1,13 +1,14 @@
 #include <linux/acceleration.h>
 #include <linux/syscalls.h>
 #include <linux/errno.h>
-
+#include <linux/uaccess.h>
 int set_acceleration(struct dev_acceleration __user *acceleration)
 {
-	printk("in syscall 249 set_acceleration");
 	struct dev_acceleration* k_acceleration;
-	int size = sizeof(acceleration);
-	if(copy_from_user(k_acceleration, acceleration, size)
+	int size = sizeof(struct dev_acceleration);
+	
+	printk("in syscall 249 set_acceleration");
+	if(copy_from_user(k_acceleration, acceleration, size))
 		return -EFAULT;
 
 	printk("detected x-axis: %d", k_acceleration->x);
