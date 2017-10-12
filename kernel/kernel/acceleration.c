@@ -2,19 +2,22 @@
 #include <linux/syscalls.h>
 #include <linux/errno.h>
 #include <linux/uaccess.h>
+#include <linux/slab.h>
 int set_acceleration(struct dev_acceleration __user *acceleration)
 {
 	struct dev_acceleration* k_acceleration;
-	int size = sizeof(struct dev_acceleration);
-	
+	int res;
+
+	k_acceleration = kmalloc(sizeof(struct dev_acceleration),GFP_KERNEL);
 	printk("in syscall 249 set_acceleration");
-	if(copy_from_user(k_acceleration, acceleration, size))
+	res = copy_from_user(k_acceleration, acceleration, sizeof(struct dev_acceleration));
+	if (res != 0)
 		return -EFAULT;
 
 	printk("detected x-axis: %d", k_acceleration->x);
 	printk("detected y-axis: %d", k_acceleration->y);
 	printk("detected z-axis: %d", k_acceleration->z);
-
+	kfree(k_acceleration);
 	return 0;
 }
 int accevt_destroy(int event_id)
