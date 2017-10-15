@@ -122,38 +122,38 @@ int accevt_destroy(int event_id)
 		spin_unlock(&event_lock);
 		return -EINVAL;
 	} else {
-		write_lock(&(cur->process_lock));
-		cur->destroy = true;
-		write_unlock(&(cur->process_lock));
-		if (cur->id != head->id) {
-			prev = head;
-			while (prev->next != cur)
+		write_lock(&(delete->process_lock));
+		delete->destroy = true;
+		write_unlock(&(delete->process_lock));
+		if (delete->id != head_event->id) {
+			prev = head_event;
+			while (prev->next != delete)
 				prev = prev->next;
 		}
 	}
 	spin_unlock(&event_lock);
-	write_lock(&(cur->process_lock));
-	if (cur->wait_proc_count != 0) {
-		cur->condition = true;
-		write_unlock(&(cur->process_lock));
-		wake_up(cur->q);
+	write_lock(&(delete->process_lock));
+	if (delete->wait_proc_count != 0) {
+		delete->condition = true;
+		write_unlock(&(delete->process_lock));
+		wake_up(&(delete->q));
 	}
-	read_lock(&(cur->process_lock));
-	while(cur->wait_proc_count != 0) {
-		read_unlock(&(cur->process_lock));
-		read_lock(&(cur->process_lock));
+	read_lock(&(delete->process_lock));
+	while(delete->wait_proc_count != 0) {
+		read_unlock(&(delete->process_lock));
+		read_lock(&(delete->process_lock));
 	}
 	spin_lock(&event_lock);
 	if (prev == NULL) {
-		head = head->next;
-		cur->next = NULL;
-		kfree(cur->baseline);
-		kfree(cur);
+		head_event = head_event->next;
+		delete->next = NULL;
+		kfree(delete->baseline);
+		kfree(delete);
 	} else {
-		pre->next = cur->next;
-		cur->next = NULL;
-		kfree(cur->baseline);
-		kfree(cur);	
+		prev->next = delete->next;
+		delete->next = NULL;
+		kfree(delete->baseline);
+		kfree(delete);	
 	}	
 	spin_unlock(&event_lock);
 	return 0;
@@ -211,18 +211,20 @@ int accevt_wait(int event_id)
 	struct event *cur;
 	wait_queue_t wait;
 
+	init_wait(&wait);
 	/* find event struct based on event_id 
 	 * and check if the process should be pushed to waitqueue*/
 	spin_lock(&event_lock);
 	cur = find_event_struct(event_id);
 	if (cur == NULL || cur->destroy == true) {
-		/* if the event doesn't exist or is ready to be destroyed, then the process
-		 * shouldn't go to the wait queue and just return -EINVAL */
+		/* if the event doesn't exist or is ready to be destroyed, 
+		 * then the process shouldn't go to the wait queue
+		 * and just return -EINVAL */
 		spin_unlock(&event_lock);
 		return -EINVAL;
 	}
 	printk("accevt_wait: finish the first lock\n");
-	spin_unlock(&(cur->process_lock));
+	spin_unlock(&event_lock);
 
 	/* count the number of processes that will be put into waitqueue */
 	write_lock(&(cur->process_lock));
@@ -232,7 +234,6 @@ int accevt_wait(int event_id)
 	/* put process into waitqueue q */
 	/* all the wait functions contains locks, we don't need to lock before using these
 	 * functions */
-	init_wait(&wait);
 	add_wait_queue(&(cur->q), &wait);
 	while(!cur->condition) {
 		prepare_to_wait(&(cur->q), &wait, TASK_INTERRUPTIBLE);
@@ -249,7 +250,7 @@ int accevt_wait(int event_id)
 	if (cur->destroy) {
 		write_unlock(&(cur->process_lock));
 		return -EINVAL;
-	}	
+	}
 	/* if the event is triggered by accevt_destroy(), then the function shoud
 	 * return 0 and the woken-up process should print sth and the 
 	 * number of processes in the waitqueue q should be decreased by 1*/
