@@ -19,8 +19,8 @@ int main(int argc, char **argv)
 
 	vertical.dlt_x = 0;
 	vertical.dlt_y = 0;
-	vertical.dlt_z = 10;
-	vertical.frq = 2;
+	vertical.dlt_z = 100;
+	vertical.frq = 6;
 	horizontal.dlt_x = 100;
 	horizontal.dlt_y = 100;
 	horizontal.dlt_z = 0;
@@ -39,15 +39,15 @@ int main(int argc, char **argv)
 		if (res != 0)
 			printf("Error: %s", strerror(errno));
 	}
-
+	i = 1;
 	while(1) {
-		printf("here");
 		res = syscall(251, 0);
 		if (res != 0) {
 			printf("Error: %s", strerror(errno));
 			break;
 		}
-		printf("%d detected a vertical shake\n", getpid());
+		printf("%d: %d detected a vertical shake\n", i, getpid());
+		i++;
 	}
 
 	return 0;
