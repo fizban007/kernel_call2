@@ -114,53 +114,39 @@ int accevt_destroy(int event_id)
 	struct event *delete=NULL, *prev=NULL;
 	spin_lock(&event_lock);
 	delete = find_event_struct(event_id);
-	if (delete == NULL) {
-		spin_unlock(&event_lock);
-		return -EINVAL;
-	}
-	if (delete->destroy == true) {
-		/* some process has already called accevt_destroy() for this event
-		 * hence for this process we just return -EINVAL to show nonexistence*/
+	if (delete == NULL || delete->destroy == true) {
 		spin_unlock(&event_lock);
 		return -EINVAL;
 	} else {
 		write_lock(&(delete->destroy_lock));
 		delete->destroy = true;
 		write_unlock(&(delete->destroy_lock));
+		write_lock(&(delete->condition_lock));
+		delete->condition = true;
+		write_unlock(&(delete->condition_lock));
+
 		if (delete->id != head_event->id) {
 			prev = head_event;
 			while (prev->next != delete)
 				prev = prev->next;
-		}
+			prev->next = delete->next;
+		} else
+			head_event = delete->next;
+		delete->next = NULL;
 	}
 	spin_unlock(&event_lock);
 	read_lock(&(delete->wait_proc_count_lock));
 	if (delete->wait_proc_count != 0) {
-		write_lock(&(delete->condition_lock));
-		delete->condition = true;
-		write_unlock(&(delete->condition_lock));
-		read_unlock(&(delete->wait_proc_count_lock));
 		wake_up(&(delete->q));
 	}
-	read_lock(&(delete->wait_proc_count_lock));
 	while(delete->wait_proc_count != 0) {
 		read_unlock(&(delete->wait_proc_count_lock));
 		read_lock(&(delete->wait_proc_count_lock));
 	}
 	read_unlock(&(delete->wait_proc_count_lock));
-	spin_lock(&event_lock);
-	if (prev == NULL) {
-		head_event = head_event->next;
-		delete->next = NULL;
-		kfree(delete->baseline);
-		kfree(delete);
-	} else {
-		prev->next = delete->next;
-		delete->next = NULL;
-		kfree(delete->baseline);
-		kfree(delete);	
-	}	
-	spin_unlock(&event_lock);
+	
+	kfree(delete->baseline);
+	kfree(delete);	
 	return 0;
 }
 
@@ -198,7 +184,8 @@ int accevt_create(struct acc_motion __user *acceleration)
 	rwlock_init(&(new_event->condition_lock));
 	rwlock_init(&(new_event->wait_proc_count_lock));
 
-	/* put the new_event to the linked list "events" and let num_event plus 1 */
+	/* put the new_event to the linked list "events" 
+	 * let num_event plus 1 */
 	spin_lock(&event_lock);
 	num_event++;
 	if (head_event == NULL) {
@@ -253,17 +240,17 @@ int accevt_wait(int event_id)
 	 * will be changed to -1 in the destroy function, hence we can use the id to check.
 	*/
 	write_lock(&(cur->wait_proc_count_lock));
-	cur->wait_proc_count -= 1;
-
 	read_lock(&(cur->destroy_lock));
 	if (cur->destroy) {
+		cur->wait_proc_count -= 1;
 		read_unlock(&(cur->destroy_lock));
+		write_unlock(&(cur->wait_proc_count_lock));
 		return -EINVAL;
 	}
 	/* if the event is triggered by accevt_destroy(), then the function shoud
 	 * return 0 and the woken-up process should print sth and the 
 	 * number of processes in the waitqueue q should be decreased by 1*/
-	if (cur->wait_proc_count == 0) {
+	if ((--cur->wait_proc_count) == 0) {
 		write_lock(&(cur->condition_lock));
 		cur->condition = false;
 		write_unlock(&(cur->condition_lock));
