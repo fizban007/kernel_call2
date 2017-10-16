@@ -662,6 +662,22 @@ __SC_COMP(__NR_recvmmsg, sys_recvmmsg, compat_sys_recvmmsg)
  */
 #define __NR_arch_specific_syscall 244
 
+/* Syscall 249 to 253 added 
+   for hw3
+ */
+#define __NR_set_acceleration 249
+__SYSCALL(__NR_set_acceleration, sys_set_acceleration)
+#define __NR_accevt_create 250
+__SYSCALL(__NR_accevt_create, sys_accevt_create)
+#define __NR_accevt_wait 251
+__SYSCALL(__NR_accevt_wait, sys_accevt_wait)
+#define __NR_accevt_signal 252
+__SYSCALL(__NR_accevt_signal, sys_accevt_signal)
+#define __NR_accevt_destroy 253
+__SYSCALL(__NR_accevt_destroy, sys_accevt_destroy)
+/* Above 249 to 253 added for hw3
+ */
+
 #define __NR_wait4 260
 __SC_COMP(__NR_wait4, sys_wait4, compat_sys_wait4)
 #define __NR_prlimit64 261
