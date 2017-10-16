@@ -6,6 +6,8 @@
  * Adapted from Fall 2016 solution
  *
  */
+#define DEBUG_MODE
+
 #include <fcntl.h>
 #include <math.h>
 #include <stdio.h>
@@ -164,6 +166,12 @@ static int poll_sensor_data(struct sensors_poll_device_t *sensors_device)
 		ssize_t count = sensors_device->poll(sensors_device,
 						buffer,
 						buf_size);
+		cur_acceleration = (struct dev_acceleration *)
+					malloc(sizeof(struct dev_acceleration));
+		if(!cur_acceleration) {
+			fprintf(stderr, "error: %s\n", strerror(errno));
+			exit(1);
+		}
 		/*
 		 * TODO: You have the acceleration here - scale it and
 		 * send it to kernel
@@ -187,7 +195,13 @@ static int poll_sensor_data(struct sensors_poll_device_t *sensors_device)
 			cur_acceleration->x = (int) ((buffer[count-1].acceleration.x)*100);
 			cur_acceleration->y = (int) ((buffer[count-1].acceleration.y)*100);
 			cur_acceleration->z = (int) ((buffer[count-1].acceleration.z)*100);
-			
+
+			#ifdef DEBUG_MODE
+			printf("cur_x is %d", cur_acceleration->x);
+			printf("cur_y is %d", cur_acceleration->y);
+			printf("cur_z is %d", cur_acceleration->z);
+			#endif
+						
 			err = syscall(252, cur_acceleration);
 			if(err)
 				printf("Error: accevt_signal failed\n");
