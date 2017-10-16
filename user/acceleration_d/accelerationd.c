@@ -93,8 +93,9 @@ int main(int argc, char **argv)
 	 * TODO: Implement your code to make this process a daemon in
 	 * daemon_mode function
 	 */
+	/*
 	daemon_mode();
-
+	*/
 	printf("Opening sensors...\n");
 	if (open_sensors(&sensors_module,
 			 &sensors_device) < 0) {
