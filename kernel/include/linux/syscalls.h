@@ -65,6 +65,8 @@ struct old_linux_dirent;
 struct perf_event_attr;
 struct file_handle;
 struct sigaltstack;
+struct acc_motion;
+struct dev_acceleration;
 
 #include <linux/types.h>
 #include <linux/aio_abi.h>
@@ -856,4 +858,10 @@ asmlinkage long sys_kcmp(pid_t pid1, pid_t pid2, int type,
 asmlinkage long sys_finit_module(int fd, const char __user *uargs, int flags);
 asmlinkage long sys_seccomp(unsigned int op, unsigned int flags,
 			    const char __user *uargs);
+/*added for hw3*/
+asmlinkage long sys_set_acceleration(struct dev_acceleration __user *acceleration);
+asmlinkage long sys_accevt_create(struct acc_motion __user *acceleration);
+asmlinkage long sys_accevt_wait(int event_id);
+asmlinkage long sys_accevt_signal(struct dev_acceleration __user *acceleration);
+asmlinkage long sys_accevt_destroy(int event_id);
 #endif
