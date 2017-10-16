@@ -12,17 +12,13 @@
 /*https://www.linuxquestions.org/questions/programming-9/mtx_os-c-35-37-error-%91spin_lock_unlocked%92-undeclared-here-not-in-a-function-4175468757/*/
 static DEFINE_SPINLOCK(acceleration_xyz_lock);
 static DEFINE_SPINLOCK(event_lock);
-/*http://tuxthink.blogspot.com/2011/04/wait-queues.html*/
-DECLARE_WAIT_QUEUE_HEAD(process);
+static DEFINE_SPINLOCK(set_acceleration_lock);
+
 
 struct acceleration_xyz {
 	struct dev_acceleration *xyz;
 	struct acceleration_xyz *next;
 };
-
-struct acceleration_xyz *head = NULL;
-struct acceleration_xyz *tail = NULL;
-int xyz_len = 0;
 
 struct event {
 	struct acc_motion *baseline;
@@ -30,7 +26,7 @@ struct event {
 	bool condition; /* true if wake up false if put process to wait */
 	bool destroy; /* true if accevt_destroy(event_id) is called */
 	wait_queue_head_t q;
-	rwlock_t condition_lock;
+//	rwlock_t condition_lock;
 	rwlock_t destroy_lock;
 	rwlock_t wait_proc_count_lock;
 	int wait_proc_count;
@@ -38,10 +34,15 @@ struct event {
 	struct event *next;
 	
 };
+struct acceleration_xyz *head = NULL;
+struct acceleration_xyz *tail = NULL;
+int xyz_len = 0;
 
 struct event *head_event = NULL;
 struct event *tail_event = NULL;
 int num_event = 0;
+
+struct dev_acceleration dev_acc;
 
 int set_acceleration(struct dev_acceleration __user *acceleration)
 {
@@ -56,9 +57,11 @@ int set_acceleration(struct dev_acceleration __user *acceleration)
 	if (res != 0)
 		return -EFAULT;
 
-/*	printk("detected x-axis: %d\n", k_acceleration->x);
-	printk("detected y-axis: %d\n", k_acceleration->y);
-	printk("detected z-axis: %d\n", k_acceleration->z);*/
+	spin_lock(&set_acceleration_lock);
+	dev_acc.x = k_acceleration->x;
+	dev_acc.y = k_acceleration->y;
+	dev_acc.z = k_acceleration->z;
+	spin_unlock(&set_acceleration_lock);
 	kfree(k_acceleration);
 	return 0;
 }
@@ -121,9 +124,9 @@ int accevt_destroy(int event_id)
 		write_lock(&(delete->destroy_lock));
 		delete->destroy = true;
 		write_unlock(&(delete->destroy_lock));
-		write_lock(&(delete->condition_lock));
+	//	write_lock(&(delete->condition_lock));
 		delete->condition = true;
-		write_unlock(&(delete->condition_lock));
+	//	write_unlock(&(delete->condition_lock));
 
 		if (delete->id != head_event->id) {
 			prev = head_event;
@@ -181,7 +184,7 @@ int accevt_create(struct acc_motion __user *acceleration)
 	new_event->wait_proc_count = 0;
 	init_waitqueue_head(&(new_event->q));
 	rwlock_init(&(new_event->destroy_lock));
-	rwlock_init(&(new_event->condition_lock));
+//	rwlock_init(&(new_event->condition_lock));
 	rwlock_init(&(new_event->wait_proc_count_lock));
 
 	/* put the new_event to the linked list "events" 
@@ -205,6 +208,7 @@ int accevt_wait(int event_id)
 	struct event *cur;
 	wait_queue_t wait;
 
+	printk("event_id: %d\n", event_id);
 	init_wait(&wait);
 	/* find event struct based on event_id 
 	 * and check if the process should be pushed to waitqueue*/
@@ -241,23 +245,22 @@ int accevt_wait(int event_id)
 	*/
 	write_lock(&(cur->wait_proc_count_lock));
 	read_lock(&(cur->destroy_lock));
-	if (cur->destroy) {
+	if (cur->destroy == true) {
 		cur->wait_proc_count -= 1;
 		read_unlock(&(cur->destroy_lock));
 		write_unlock(&(cur->wait_proc_count_lock));
 		return -EINVAL;
 	}
+	read_unlock(&(cur->destroy_lock));
 	/* if the event is triggered by accevt_destroy(), then the function shoud
 	 * return 0 and the woken-up process should print sth and the 
 	 * number of processes in the waitqueue q should be decreased by 1*/
 	if ((--cur->wait_proc_count) == 0) {
-		write_lock(&(cur->condition_lock));
+//		write_lock(&(cur->condition_lock));
 		cur->condition = false;
-		write_unlock(&(cur->condition_lock));
+//		write_unlock(&(cur->condition_lock));
 	}
-	read_unlock(&(cur->destroy_lock));
 	write_unlock(&(cur->wait_proc_count_lock));
-	printk("condition=%d\n", cur->condition);
 	return 0;
 }
 int accevt_signal(struct dev_acceleration __user *acceleration)
@@ -325,9 +328,9 @@ int accevt_signal(struct dev_acceleration __user *acceleration)
 			if ( res == 1) {
 				/* invoke signal */
 				printk("send signal res = %d\n", res);
-				write_lock(&(ptr->condition_lock));
+		//		write_lock(&(ptr->condition_lock));
 				ptr->condition = true;
-				write_unlock(&(ptr->condition_lock));
+		//		write_unlock(&(ptr->condition_lock));
 				wake_up(&(ptr->q));
 			}
 			ptr = ptr->next;
