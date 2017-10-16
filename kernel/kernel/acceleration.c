@@ -26,11 +26,12 @@ struct event {
 	bool condition; /* true if wake up false if put process to wait */
 	bool destroy; /* true if accevt_destroy(event_id) is called */
 	wait_queue_head_t q;
-//	rwlock_t condition_lock;
-	rwlock_t destroy_lock;
-	rwlock_t wait_proc_count_lock;
+//	rwlock_t wake_up_num_lock;
+//	rwlock_t destroy_lock;
+//	rwlock_t wait_proc_count_lock;
+	struct mutex queue_lock;
 	int wait_proc_count;
-	
+	int wake_up_num;
 	struct event *next;
 	
 };
@@ -121,12 +122,6 @@ int accevt_destroy(int event_id)
 		spin_unlock(&event_lock);
 		return -EINVAL;
 	} else {
-		write_lock(&(delete->destroy_lock));
-		delete->destroy = true;
-		write_unlock(&(delete->destroy_lock));
-	//	write_lock(&(delete->condition_lock));
-		delete->condition = true;
-	//	write_unlock(&(delete->condition_lock));
 
 		if (delete->id != head_event->id) {
 			prev = head_event;
@@ -138,15 +133,19 @@ int accevt_destroy(int event_id)
 		delete->next = NULL;
 	}
 	spin_unlock(&event_lock);
-	read_lock(&(delete->wait_proc_count_lock));
+	mutex_lock(&(delete->queue_lock));
 	if (delete->wait_proc_count != 0) {
+		delete->destroy = true;
+		delete->condition = true;
+		delete->wake_up_num = delete->wait_proc_count;
 		wake_up(&(delete->q));
+	
+		while(delete->wait_proc_count != 0) {
+			mutex_unlock(&(delete->queue_lock));
+			mutex_lock(&(delete->queue_lock));
+		}
 	}
-	while(delete->wait_proc_count != 0) {
-		read_unlock(&(delete->wait_proc_count_lock));
-		read_lock(&(delete->wait_proc_count_lock));
-	}
-	read_unlock(&(delete->wait_proc_count_lock));
+	mutex_unlock(&(delete->queue_lock));
 	
 	kfree(delete->baseline);
 	kfree(delete);	
@@ -182,11 +181,13 @@ int accevt_create(struct acc_motion __user *acceleration)
 	new_event->condition = false;
 	new_event->destroy = false;
 	new_event->wait_proc_count = 0;
+	new_event->wake_up_num = 0;
 	init_waitqueue_head(&(new_event->q));
-	rwlock_init(&(new_event->destroy_lock));
+//	rwlock_init(&(new_event->destroy_lock));
 //	rwlock_init(&(new_event->condition_lock));
-	rwlock_init(&(new_event->wait_proc_count_lock));
-
+//	rwlock_init(&(new_event->wait_proc_count_lock));
+	mutex_init(&(new_event->queue_lock));
+	//rwlock_init(&(new_event->wake_up_num_lock));
 	/* put the new_event to the linked list "events" 
 	 * let num_event plus 1 */
 	spin_lock(&event_lock);
@@ -214,10 +215,7 @@ int accevt_wait(int event_id)
 	 * and check if the process should be pushed to waitqueue*/
 	spin_lock(&event_lock);
 	cur = find_event_struct(event_id);
-	if (cur == NULL || cur->destroy == true) {
-		/* if the event doesn't exist or is ready to be destroyed, 
-		 * then the process shouldn't go to the wait queue
-		 * and just return -EINVAL */
+	if (cur == NULL) {
 		spin_unlock(&event_lock);
 		return -EINVAL;
 	}
@@ -225,42 +223,36 @@ int accevt_wait(int event_id)
 	spin_unlock(&event_lock);
 
 	/* count the number of processes that will be put into waitqueue */
-	write_lock(&(cur->wait_proc_count_lock));
-	cur->wait_proc_count += 1;
+	mutex_lock(&(cur->queue_lock));
 	printk("cur->wait_proc_count:%d\n",cur->wait_proc_count);
-	write_unlock(&(cur->wait_proc_count_lock));
 	/* put process into waitqueue q */
-	/* all the wait functions contains locks, we don't need to lock before using these
-	 * functions */
+	while (cur->wake_up_num != 0) {
+		mutex_unlock(&(cur->queue_lock));
+		mutex_lock(&(cur->queue_lock));
+	}
+	if(cur->destroy == true) {
+		mutex_unlock(&(cur->queue_lock));
+		return -EINVAL;
+	}
+	cur->wait_proc_count += 1;
+
 	add_wait_queue(&(cur->q), &wait);
 	while(!cur->condition) {
 		prepare_to_wait(&(cur->q), &wait, TASK_INTERRUPTIBLE);
+		mutex_unlock(&(cur->queue_lock));
 		schedule();
+		mutex_lock(&(cur->queue_lock));
+		cur->wake_up_num--;
+		cur->wait_proc_count--;
 	}
 	finish_wait(&(cur->q), &wait);
 	printk("wake up\n");
-	/* check if the event will be destroyed immediately when the 
-	 * process is waiting for the event to happen. Before being destroyed, the event id
-	 * will be changed to -1 in the destroy function, hence we can use the id to check.
-	*/
-	write_lock(&(cur->wait_proc_count_lock));
-	read_lock(&(cur->destroy_lock));
-	if (cur->destroy == true) {
-		cur->wait_proc_count -= 1;
-		read_unlock(&(cur->destroy_lock));
-		write_unlock(&(cur->wait_proc_count_lock));
+	if (cur->destroy == true)
 		return -EINVAL;
-	}
-	read_unlock(&(cur->destroy_lock));
-	/* if the event is triggered by accevt_destroy(), then the function shoud
-	 * return 0 and the woken-up process should print sth and the 
-	 * number of processes in the waitqueue q should be decreased by 1*/
-	if ((--cur->wait_proc_count) == 0) {
-//		write_lock(&(cur->condition_lock));
+	if (cur->wait_proc_count == 0)
 		cur->condition = false;
-//		write_unlock(&(cur->condition_lock));
-	}
-	write_unlock(&(cur->wait_proc_count_lock));
+
+	mutex_unlock(&(cur->queue_lock));
 	return 0;
 }
 int accevt_signal(struct dev_acceleration __user *acceleration)
@@ -272,14 +264,14 @@ int accevt_signal(struct dev_acceleration __user *acceleration)
 
 	//printk("in the syscall 252\n");
 	new_xyz = kmalloc(sizeof(struct dev_acceleration), GFP_KERNEL);
-	if (new_xyz == NULL) /* kmalloc error */
+	if (new_xyz == NULL)
 		return -ENOMEM;
 	res = copy_from_user(new_xyz, acceleration,
 				sizeof(struct dev_acceleration));
-	if (res != 0) /* copy error */
+	if (res != 0)
 		return -EFAULT;
 	to_add = kmalloc(sizeof(struct acceleration_xyz), GFP_KERNEL);
-	if (to_add == NULL) { /* kmalloc error again */
+	if (to_add == NULL) {
 		kfree(new_xyz);
 		return -ENOMEM;
 	}
@@ -307,19 +299,6 @@ int accevt_signal(struct dev_acceleration __user *acceleration)
 		kfree(delete);
 		xyz_len = WINDOW;
 	}
-	spin_unlock(&acceleration_xyz_lock);
-	/* test result */
-/*	temp = head;
-	while (temp != NULL) {
-		printk("x=%d,y=%d,z=%d\n",temp->xyz->x,temp->xyz->y,temp->xyz->z);
-		temp = temp->next;
-	}*/
-
-	/* check if some event happen when the event list is not empty 
-	 * loop each event struct, call the check_window() function
-	 * return 1 if a event should happen else return 0 
-	 */
-	spin_lock(&acceleration_xyz_lock);
 	spin_lock(&event_lock);
 	if (head_event != NULL) {/* check if the event linked list is empty */
 		ptr = head_event;
@@ -328,10 +307,14 @@ int accevt_signal(struct dev_acceleration __user *acceleration)
 			if ( res == 1) {
 				/* invoke signal */
 				printk("send signal res = %d\n", res);
-		//		write_lock(&(ptr->condition_lock));
-				ptr->condition = true;
-		//		write_unlock(&(ptr->condition_lock));
-				wake_up(&(ptr->q));
+				mutex_lock(&(ptr->queue_lock));
+				if (ptr->wait_proc_count != 0) {
+					ptr->condition = true;
+					ptr->wake_up_num = 
+						ptr->wait_proc_count;
+					wake_up(&(ptr->q));
+				}
+				mutex_unlock(&(ptr->queue_lock));
 			}
 			ptr = ptr->next;
 		}

@@ -93,9 +93,8 @@ int main(int argc, char **argv)
 	 * TODO: Implement your code to make this process a daemon in
 	 * daemon_mode function
 	 */
-	/*
 	daemon_mode();
-	*/
+
 	printf("Opening sensors...\n");
 	if (open_sensors(&sensors_module,
 			 &sensors_device) < 0) {
@@ -125,7 +124,7 @@ emulation:
 			break;
 		}
 		printf("slept for: %d ms\n", TIME_INTERVAL);
-		break; /* to test 249 only */
+		 /* to test 249 only */
 	}
 
 	return EXIT_SUCCESS;
@@ -179,7 +178,7 @@ static int poll_sensor_data(struct sensors_poll_device_t *sensors_device)
 			count--;
 		}
 
-		if(count < 0) { /* Failed to find event with accelerometer handler # */
+		if(count <= 0) { /* Failed to find event with accelerometer handler # */
 			err = 1;
 			printf("Failed to locate sensor using handler in buffer\n");
 		} else { /* found accelerometer's event*/
@@ -187,7 +186,9 @@ static int poll_sensor_data(struct sensors_poll_device_t *sensors_device)
 			cur_acceleration->x = (int) ((buffer[count-1].acceleration.x)*100);
 			cur_acceleration->y = (int) ((buffer[count-1].acceleration.y)*100);
 			cur_acceleration->z = (int) ((buffer[count-1].acceleration.z)*100);
-			
+			printf("cur_acceleration->x = %d\n", cur_acceleration->x);
+			printf("cur_acceleration->y = %d\n", cur_acceleration->y);
+			printf("cur_acceleration->z = %d\n", cur_acceleration->z);
 			err = syscall(252, cur_acceleration);
 			if(err)
 				printf("Error: accevt_signal failed\n");
