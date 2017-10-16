@@ -23,17 +23,12 @@
 #include <linux/irq_work.h>
 #include <linux/posix-timers.h>
 #include <linux/perf_event.h>
-#include <linux/rq_stats.h>
 
 #include <asm/irq_regs.h>
 
 #include "tick-internal.h"
 
 #include <trace/events/timer.h>
-
-struct rq_data rq_info;
-struct workqueue_struct *rq_wq;
-spinlock_t rq_lock;
 
 /*
  * Per cpu nohz control structure
@@ -405,9 +400,11 @@ __setup("nohz=", setup_tick_nohz);
  */
 static void tick_nohz_update_jiffies(ktime_t now)
 {
+	int cpu = smp_processor_id();
+	struct tick_sched *ts = &per_cpu(tick_cpu_sched, cpu);
 	unsigned long flags;
 
-	__this_cpu_write(tick_cpu_sched.idle_waketime, now);
+	ts->idle_waketime = now;
 
 	local_irq_save(flags);
 	tick_do_update_jiffies64(now);
@@ -438,15 +435,17 @@ update_ts_time_stats(int cpu, struct tick_sched *ts, ktime_t now, u64 *last_upda
 
 }
 
-static void tick_nohz_stop_idle(struct tick_sched *ts, ktime_t now)
+static void tick_nohz_stop_idle(int cpu, ktime_t now)
 {
-	update_ts_time_stats(smp_processor_id(), ts, now, NULL);
+	struct tick_sched *ts = &per_cpu(tick_cpu_sched, cpu);
+
+	update_ts_time_stats(cpu, ts, now, NULL);
 	ts->idle_active = 0;
 
 	sched_clock_idle_wakeup_event(0);
 }
 
-static ktime_t tick_nohz_start_idle(struct tick_sched *ts)
+static ktime_t tick_nohz_start_idle(int cpu, struct tick_sched *ts)
 {
 	ktime_t now = ktime_get();
 
@@ -683,6 +682,7 @@ static ktime_t tick_nohz_stop_sched_tick(struct tick_sched *ts,
 out:
 	ts->next_jiffies = next_jiffies;
 	ts->last_jiffies = last_jiffies;
+	ts->sleep_length = ktime_sub(dev->next_event, now);
 
 	return ret;
 }
@@ -761,7 +761,7 @@ static void __tick_nohz_idle_enter(struct tick_sched *ts)
 	ktime_t now, expires;
 	int cpu = smp_processor_id();
 
-	now = tick_nohz_start_idle(ts);
+	now = tick_nohz_start_idle(cpu, ts);
 
 	if (can_stop_idle_tick(cpu, ts)) {
 		int was_stopped = ts->tick_stopped;
@@ -832,10 +832,13 @@ void tick_nohz_irq_exit(void)
 {
 	struct tick_sched *ts = &__get_cpu_var(tick_cpu_sched);
 
-	if (ts->inidle)
+	if (ts->inidle) {
+		/* Cancel the timer because CPU already waken up from the C-states*/
+		menu_hrtimer_cancel();
 		__tick_nohz_idle_enter(ts);
-	else
+	} else {
 		tick_nohz_full_stop_tick(ts);
+	}
 }
 
 /**
@@ -846,8 +849,8 @@ void tick_nohz_irq_exit(void)
 ktime_t tick_nohz_get_sleep_length(void)
 {
 	struct tick_sched *ts = &__get_cpu_var(tick_cpu_sched);
-	struct clock_event_device *dev = __get_cpu_var(tick_cpu_device).evtdev;
-	return ktime_sub(dev->next_event, ts->idle_entrytime);
+
+	return ts->sleep_length;
 }
 
 static void tick_nohz_restart(struct tick_sched *ts, ktime_t now)
@@ -923,7 +926,8 @@ static void tick_nohz_account_idle_ticks(struct tick_sched *ts)
  */
 void tick_nohz_idle_exit(void)
 {
-	struct tick_sched *ts = &__get_cpu_var(tick_cpu_sched);
+	int cpu = smp_processor_id();
+	struct tick_sched *ts = &per_cpu(tick_cpu_sched, cpu);
 	ktime_t now;
 
 	local_irq_disable();
@@ -932,11 +936,13 @@ void tick_nohz_idle_exit(void)
 
 	ts->inidle = 0;
 
+	/* Cancel the timer because CPU already waken up from the C-states*/
+	menu_hrtimer_cancel();
 	if (ts->idle_active || ts->tick_stopped)
 		now = ktime_get();
 
 	if (ts->idle_active)
-		tick_nohz_stop_idle(ts, now);
+		tick_nohz_stop_idle(cpu, now);
 
 	if (ts->tick_stopped) {
 		tick_nohz_restart_sched_tick(ts, now);
@@ -1020,10 +1026,12 @@ static void tick_nohz_switch_to_nohz(void)
  * timer and do not touch the other magic bits which need to be done
  * when idle is left.
  */
-static void tick_nohz_kick_tick(struct tick_sched *ts, ktime_t now)
+static void tick_nohz_kick_tick(int cpu, ktime_t now)
 {
 #if 0
 	/* Switch back to 2.6.27 behaviour */
+
+	struct tick_sched *ts = &per_cpu(tick_cpu_sched, cpu);
 	ktime_t delta;
 
 	/*
@@ -1038,86 +1046,42 @@ static void tick_nohz_kick_tick(struct tick_sched *ts, ktime_t now)
 #endif
 }
 
-static inline void tick_check_nohz_this_cpu(void)
+static inline void tick_check_nohz(int cpu)
 {
-	struct tick_sched *ts = &__get_cpu_var(tick_cpu_sched);
+	struct tick_sched *ts = &per_cpu(tick_cpu_sched, cpu);
 	ktime_t now;
 
 	if (!ts->idle_active && !ts->tick_stopped)
 		return;
 	now = ktime_get();
 	if (ts->idle_active)
-		tick_nohz_stop_idle(ts, now);
+		tick_nohz_stop_idle(cpu, now);
 	if (ts->tick_stopped) {
 		tick_nohz_update_jiffies(now);
-		tick_nohz_kick_tick(ts, now);
+		tick_nohz_kick_tick(cpu, now);
 	}
 }
 
 #else
 
 static inline void tick_nohz_switch_to_nohz(void) { }
-static inline void tick_check_nohz_this_cpu(void) { }
+static inline void tick_check_nohz(int cpu) { }
 
 #endif /* CONFIG_NO_HZ_COMMON */
 
 /*
  * Called from irq_enter to notify about the possible interruption of idle()
  */
-void tick_check_idle(void)
+void tick_check_idle(int cpu)
 {
-	tick_check_oneshot_broadcast_this_cpu();
-	tick_check_nohz_this_cpu();
+	tick_check_oneshot_broadcast(cpu);
+	tick_check_nohz(cpu);
 }
 
 /*
  * High resolution timer specific code
  */
 #ifdef CONFIG_HIGH_RES_TIMERS
-static void update_rq_stats(void)
-{
-	unsigned long jiffy_gap = 0;
-	unsigned int rq_avg = 0;
-	unsigned long flags = 0;
-
-	jiffy_gap = jiffies - rq_info.rq_poll_last_jiffy;
-
-	if (jiffy_gap >= rq_info.rq_poll_jiffies) {
-
-		spin_lock_irqsave(&rq_lock, flags);
-
-		if (!rq_info.rq_avg)
-			rq_info.rq_poll_total_jiffies = 0;
-
-		rq_avg = nr_running() * 10;
-
-		if (rq_info.rq_poll_total_jiffies) {
-			rq_avg = (rq_avg * jiffy_gap) +
-				(rq_info.rq_avg *
-				 rq_info.rq_poll_total_jiffies);
-			do_div(rq_avg,
-			       rq_info.rq_poll_total_jiffies + jiffy_gap);
-		}
-
-		rq_info.rq_avg =  rq_avg;
-		rq_info.rq_poll_total_jiffies += jiffy_gap;
-		rq_info.rq_poll_last_jiffy = jiffies;
-
-		spin_unlock_irqrestore(&rq_lock, flags);
-	}
-}
-
-static void wakeup_user(void)
-{
-	unsigned long jiffy_gap;
-
-	jiffy_gap = jiffies - rq_info.def_timer_last_jiffy;
-
-	if (jiffy_gap >= rq_info.def_timer_jiffies) {
-		rq_info.def_timer_last_jiffy = jiffies;
-		queue_work(rq_wq, &rq_info.def_timer_work);
-	}
-}
 /*
  * We rearm the timer until we get disabled by the idle code.
  * Called with interrupts disabled.
@@ -1135,22 +1099,8 @@ static enum hrtimer_restart tick_sched_timer(struct hrtimer *timer)
 	 * Do not call, when we are not in irq context and have
 	 * no valid regs pointer
 	 */
-	if (regs) {
+	if (regs)
 		tick_sched_handle(ts, regs);
-
-		if (rq_info.init == 1 &&
-				tick_do_timer_cpu == smp_processor_id()) {
-			/*
-			 * update run queue statistics
-			 */
-			update_rq_stats();
-
-			/*
-			 * wakeup user if needed
-			 */
-			wakeup_user();
-		}
-	}
 
 	hrtimer_forward(timer, now, tick_period);
 

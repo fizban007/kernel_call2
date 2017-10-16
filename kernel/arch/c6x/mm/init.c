@@ -18,7 +18,6 @@
 #include <linux/initrd.h>
 
 #include <asm/sections.h>
-#include <asm/uaccess.h>
 
 /*
  * ZERO_PAGE is a special page that is used for zero-initialized
@@ -65,7 +64,7 @@ void __init mem_init(void)
 	high_memory = (void *)(memory_end & PAGE_MASK);
 
 	/* this will put all memory onto the freelists */
-	free_all_bootmem();
+	totalram_pages = free_all_bootmem();
 
 	codek = (_etext - _stext) >> 10;
 	datak = (_end - _sdata) >> 10;

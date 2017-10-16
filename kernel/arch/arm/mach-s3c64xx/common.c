@@ -21,7 +21,6 @@
 #include <linux/ioport.h>
 #include <linux/serial_core.h>
 #include <linux/platform_device.h>
-#include <linux/reboot.h>
 #include <linux/io.h>
 #include <linux/dma-mapping.h>
 #include <linux/irq.h>
@@ -376,10 +375,10 @@ static int __init s3c64xx_init_irq_eint(void)
 }
 arch_initcall(s3c64xx_init_irq_eint);
 
-void s3c64xx_restart(enum reboot_mode mode, const char *cmd)
+void s3c64xx_restart(char mode, const char *cmd)
 {
-	if (mode != REBOOT_SOFT)
-		samsung_wdt_reset();
+	if (mode != 's')
+		arch_wdt_reset();
 
 	/* if all else fails, or mode was for soft, jump to 0 */
 	soft_restart(0);

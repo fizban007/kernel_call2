@@ -23,7 +23,6 @@
 #include <linux/syscalls.h>
 #include <linux/ratelimit.h>
 
-#include <asm/esr.h>
 #include <asm/fpsimd.h>
 #include <asm/signal32.h>
 #include <asm/uaccess.h>
@@ -82,8 +81,6 @@ struct compat_vfp_sigframe {
 #define VFP_MAGIC		0x56465001
 #define VFP_STORAGE_SIZE	sizeof(struct compat_vfp_sigframe)
 
-#define FSR_WRITE_SHIFT		(11)
-
 struct compat_aux_sigframe {
 	struct compat_vfp_sigframe	vfp;
 
@@ -102,6 +99,34 @@ struct compat_rt_sigframe {
 };
 
 #define _BLOCKABLE (~(sigmask(SIGKILL) | sigmask(SIGSTOP)))
+
+/*
+ * For ARM syscalls, the syscall number has to be loaded into r7.
+ * We do not support an OABI userspace.
+ */
+#define MOV_R7_NR_SIGRETURN	(0xe3a07000 | __NR_compat_sigreturn)
+#define SVC_SYS_SIGRETURN	(0xef000000 | __NR_compat_sigreturn)
+#define MOV_R7_NR_RT_SIGRETURN	(0xe3a07000 | __NR_compat_rt_sigreturn)
+#define SVC_SYS_RT_SIGRETURN	(0xef000000 | __NR_compat_rt_sigreturn)
+
+/*
+ * For Thumb syscalls, we also pass the syscall number via r7. We therefore
+ * need two 16-bit instructions.
+ */
+#define SVC_THUMB_SIGRETURN	(((0xdf00 | __NR_compat_sigreturn) << 16) | \
+				   0x2700 | __NR_compat_sigreturn)
+#define SVC_THUMB_RT_SIGRETURN	(((0xdf00 | __NR_compat_rt_sigreturn) << 16) | \
+				   0x2700 | __NR_compat_rt_sigreturn)
+
+const compat_ulong_t aarch32_sigret_code[6] = {
+	/*
+	 * AArch32 sigreturn code.
+	 * We don't construct an OABI SWI - instead we just set the imm24 field
+	 * to the EABI syscall number so that we create a sane disassembly.
+	 */
+	MOV_R7_NR_SIGRETURN,    SVC_SYS_SIGRETURN,    SVC_THUMB_SIGRETURN,
+	MOV_R7_NR_RT_SIGRETURN, SVC_SYS_RT_SIGRETURN, SVC_THUMB_RT_SIGRETURN,
+};
 
 static inline int put_sigset_t(compat_sigset_t __user *uset, sigset_t *set)
 {
@@ -125,7 +150,7 @@ static inline int get_sigset_t(sigset_t *set,
 	return 0;
 }
 
-int copy_siginfo_to_user32(compat_siginfo_t __user *to, const siginfo_t *from)
+int copy_siginfo_to_user32(compat_siginfo_t __user *to, siginfo_t *from)
 {
 	int err;
 
@@ -508,9 +533,7 @@ static int compat_setup_sigframe(struct compat_sigframe __user *sf,
 	__put_user_error(regs->pstate, &sf->uc.uc_mcontext.arm_cpsr, err);
 
 	__put_user_error((compat_ulong_t)0, &sf->uc.uc_mcontext.trap_no, err);
-	/* set the compat FSR WnR */
-	__put_user_error(!!(current->thread.fault_code & ESR_EL1_WRITE) <<
-			 FSR_WRITE_SHIFT, &sf->uc.uc_mcontext.error_code, err);
+	__put_user_error((compat_ulong_t)0, &sf->uc.uc_mcontext.error_code, err);
 	__put_user_error(current->thread.fault_address, &sf->uc.uc_mcontext.fault_address, err);
 	__put_user_error(set->sig[0], &sf->uc.uc_mcontext.oldmask, err);
 

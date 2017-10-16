@@ -16,7 +16,7 @@ CFLAGS_REMOVE_return_address.o = -pg
 # Object file lists.
 
 obj-y		:= elf.o entry-armv.o entry-common.o irq.o opcodes.o \
-		   process.o ptrace.o return_address.o \
+		   process.o ptrace.o return_address.o sched_clock.o \
 		   setup.o signal.o stacktrace.o sys_arm.o time.o traps.o
 
 obj-$(CONFIG_ATAGS)		+= atags_parse.o
@@ -82,9 +82,6 @@ obj-$(CONFIG_DEBUG_LL)	+= debug.o
 obj-$(CONFIG_EARLY_PRINTK)	+= early_printk.o
 
 obj-$(CONFIG_ARM_VIRT_EXT)	+= hyp-stub.o
-ifeq ($(CONFIG_ARM_PSCI),y)
-obj-y				+= psci.o
-obj-$(CONFIG_SMP)		+= psci_smp.o
-endif
+obj-$(CONFIG_ARM_PSCI)		+= psci.o
 
 extra-y := $(head-y) vmlinux.lds

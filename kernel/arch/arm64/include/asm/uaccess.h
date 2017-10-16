@@ -167,10 +167,9 @@ do {									\
 
 #define get_user(x, ptr)						\
 ({									\
-	__typeof__(*(ptr)) __user *__p = (ptr);				\
-	might_fault();							\
-	access_ok(VERIFY_READ, __p, sizeof(*__p)) ?			\
-		__get_user((x), __p) :					\
+	might_sleep();							\
+	access_ok(VERIFY_READ, (ptr), sizeof(*(ptr))) ?			\
+		__get_user((x), (ptr)) :				\
 		((x) = 0, -EFAULT);					\
 })
 
@@ -229,10 +228,9 @@ do {									\
 
 #define put_user(x, ptr)						\
 ({									\
-	__typeof__(*(ptr)) __user *__p = (ptr);				\
-	might_fault();							\
-	access_ok(VERIFY_WRITE, __p, sizeof(*__p)) ?			\
-		__put_user((x), __p) :					\
+	might_sleep();							\
+	access_ok(VERIFY_WRITE, (ptr), sizeof(*(ptr))) ?		\
+		__put_user((x), (ptr)) :				\
 		-EFAULT;						\
 })
 

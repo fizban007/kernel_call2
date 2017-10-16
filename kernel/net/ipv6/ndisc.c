@@ -372,11 +372,14 @@ static struct sk_buff *ndisc_alloc_skb(struct net_device *dev,
 	int tlen = dev->needed_tailroom;
 	struct sock *sk = dev_net(dev)->ipv6.ndisc_sk;
 	struct sk_buff *skb;
+	int err;
 
-	skb = alloc_skb(hlen + sizeof(struct ipv6hdr) + len + tlen, GFP_ATOMIC);
+	skb = sock_alloc_send_skb(sk,
+				  hlen + sizeof(struct ipv6hdr) + len + tlen,
+				  1, &err);
 	if (!skb) {
-		ND_PRINTK(0, err, "ndisc: %s failed to allocate an skb\n",
-			  __func__);
+		ND_PRINTK(0, err, "ndisc: %s failed to allocate an skb, err=%d\n",
+			  __func__, err);
 		return NULL;
 	}
 
@@ -385,11 +388,6 @@ static struct sk_buff *ndisc_alloc_skb(struct net_device *dev,
 
 	skb_reserve(skb, hlen + sizeof(struct ipv6hdr));
 	skb_reset_transport_header(skb);
-
-	/* Manually assign socket ownership as we avoid calling
-	 * sock_alloc_send_pskb() to bypass wmem buffer limits
-	 */
-	skb_set_owner_w(skb, sk);
 
 	return skb;
 }
@@ -1193,7 +1191,14 @@ static void ndisc_router_discovery(struct sk_buff *skb)
 	if (rt)
 		rt6_set_expires(rt, jiffies + (HZ * lifetime));
 	if (ra_msg->icmph.icmp6_hop_limit) {
-		in6_dev->cnf.hop_limit = ra_msg->icmph.icmp6_hop_limit;
+		/* Only set hop_limit on the interface if it is higher than
+		 * the current hop_limit.
+		 */
+		if (in6_dev->cnf.hop_limit < ra_msg->icmph.icmp6_hop_limit) {
+			in6_dev->cnf.hop_limit = ra_msg->icmph.icmp6_hop_limit;
+		} else {
+			ND_PRINTK(2, warn, "RA: Got route advertisement with lower hop_limit than current\n");
+		}
 		if (rt)
 			dst_metric_set(&rt->dst, RTAX_HOPLIMIT,
 				       ra_msg->icmph.icmp6_hop_limit);

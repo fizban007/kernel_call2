@@ -9,12 +9,6 @@
 extern const char linux_banner[];
 extern const char linux_proc_banner[];
 
-#ifdef CONFIG_HUAWEI_KERNEL
-#ifndef HIDE_PRODUCT_INFO_KERNEL
-extern const char hide_version[];
-#endif
-#endif
-
 static inline int printk_get_level(const char *buffer)
 {
 	if (buffer[0] == KERN_SOH_ASCII && buffer[1]) {
@@ -402,21 +396,5 @@ static inline void print_hex_dump_bytes(const char *prefix_str, int prefix_type,
 	print_hex_dump(KERN_DEBUG, prefix_str, prefix_type, rowsize,	\
 		       groupsize, buf, len, ascii)
 #endif /* defined(CONFIG_DYNAMIC_DEBUG) */
-
-#if defined(CONFIG_OOPS_LOG_BUFFER)
-extern void oops_printk_start(void);
-#else
-static inline void oops_printk_start(void)
-{
-}
-#endif
-
-#ifdef CONFIG_HUAWEI_KERNEL
-extern int KERNEL_HWFLOW;
-#endif
-
-#ifdef CONFIG_HUAWEI_KERNEL
-extern int KERNEL_HWFLOW;
-#endif
 
 #endif

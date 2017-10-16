@@ -386,12 +386,10 @@ static int dm_blk_ioctl(struct block_device *bdev, fmode_t mode,
 			unsigned int cmd, unsigned long arg)
 {
 	struct mapped_device *md = bdev->bd_disk->private_data;
-	struct dm_table *map;
+	struct dm_table *map = dm_get_live_table(md);
 	struct dm_target *tgt;
 	int r = -ENOTTY;
 
-retry:
-	map = dm_get_live_table(md);
 	if (!map || !dm_table_get_size(map))
 		goto out;
 
@@ -411,11 +409,6 @@ retry:
 
 out:
 	dm_table_put(map);
-
-	if (r == -ENOTCONN) {
-		msleep(10);
-		goto retry;
-	}
 
 	return r;
 }
@@ -744,7 +737,7 @@ static void free_rq_clone(struct request *clone)
  * Complete the clone and the original request.
  * Must be called without queue lock.
  */
-void dm_end_request(struct request *clone, int error)
+static void dm_end_request(struct request *clone, int error)
 {
 	int rw = rq_data_dir(clone);
 	struct dm_rq_target_io *tio = clone->end_io_data;
@@ -1685,7 +1678,7 @@ static void dm_request_fn(struct request_queue *q)
 	while (!blk_queue_stopped(q)) {
 		rq = blk_peek_request(q);
 		if (!rq)
-			goto out;
+			goto delay_and_out;
 
 		/* always use block 0 to find the target for flushes for now */
 		pos = 0;
@@ -2220,17 +2213,6 @@ struct target_type *dm_get_immutable_target_type(struct mapped_device *md)
 }
 
 /*
- * The queue_limits are only valid as long as you have a reference
- * count on 'md'.
- */
-struct queue_limits *dm_get_queue_limits(struct mapped_device *md)
-{
-	BUG_ON(!atomic_read(&md->holders));
-	return &md->queue->limits;
-}
-EXPORT_SYMBOL_GPL(dm_get_queue_limits);
-
-/*
  * Fully initialize a request-based queue (->elevator, ->request_fn, etc).
  */
 static int dm_init_request_based_queue(struct mapped_device *md)
@@ -2443,7 +2425,7 @@ static void dm_wq_work(struct work_struct *work)
 static void dm_queue_flush(struct mapped_device *md)
 {
 	clear_bit(DMF_BLOCK_IO_FOR_SUSPEND, &md->flags);
-	smp_mb__after_atomic();
+	smp_mb__after_clear_bit();
 	queue_work(md->wq, &md->work);
 }
 

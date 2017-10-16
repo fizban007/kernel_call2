@@ -63,7 +63,7 @@ static inline int atomic_add_return(int i, atomic_t *v)
 	int result;
 
 	asm volatile("// atomic_add_return\n"
-"1:	ldxr	%w0, %2\n"
+"1:	ldaxr	%w0, %2\n"
 "	add	%w0, %w0, %w3\n"
 "	stlxr	%w1, %w0, %2\n"
 "	cbnz	%w1, 1b"
@@ -71,7 +71,6 @@ static inline int atomic_add_return(int i, atomic_t *v)
 	: "Ir" (i)
 	: "memory");
 
-	smp_mb();
 	return result;
 }
 
@@ -95,7 +94,7 @@ static inline int atomic_sub_return(int i, atomic_t *v)
 	int result;
 
 	asm volatile("// atomic_sub_return\n"
-"1:	ldxr	%w0, %2\n"
+"1:	ldaxr	%w0, %2\n"
 "	sub	%w0, %w0, %w3\n"
 "	stlxr	%w1, %w0, %2\n"
 "	cbnz	%w1, 1b"
@@ -103,7 +102,6 @@ static inline int atomic_sub_return(int i, atomic_t *v)
 	: "Ir" (i)
 	: "memory");
 
-	smp_mb();
 	return result;
 }
 
@@ -112,21 +110,32 @@ static inline int atomic_cmpxchg(atomic_t *ptr, int old, int new)
 	unsigned long tmp;
 	int oldval;
 
-	smp_mb();
-
 	asm volatile("// atomic_cmpxchg\n"
-"1:	ldxr	%w1, %2\n"
+"1:	ldaxr	%w1, %2\n"
 "	cmp	%w1, %w3\n"
 "	b.ne	2f\n"
-"	stxr	%w0, %w4, %2\n"
+"	stlxr	%w0, %w4, %2\n"
 "	cbnz	%w0, 1b\n"
 "2:"
 	: "=&r" (tmp), "=&r" (oldval), "+Q" (ptr->counter)
 	: "Ir" (old), "r" (new)
 	: "cc");
 
-	smp_mb();
 	return oldval;
+}
+
+static inline void atomic_clear_mask(unsigned long mask, unsigned long *addr)
+{
+	unsigned long tmp, tmp2;
+
+	asm volatile("// atomic_clear_mask\n"
+"1:	ldxr	%0, %2\n"
+"	bic	%0, %0, %3\n"
+"	stxr	%w1, %0, %2\n"
+"	cbnz	%w1, 1b"
+	: "=&r" (tmp), "=&r" (tmp2), "+Q" (*addr)
+	: "Ir" (mask)
+	: "cc");
 }
 
 #define atomic_xchg(v, new) (xchg(&((v)->counter), new))
@@ -151,6 +160,11 @@ static inline int __atomic_add_unless(atomic_t *v, int a, int u)
 #define atomic_sub_and_test(i, v) (atomic_sub_return(i, v) == 0)
 
 #define atomic_add_negative(i,v) (atomic_add_return(i, v) < 0)
+
+#define smp_mb__before_atomic_dec()	smp_mb()
+#define smp_mb__after_atomic_dec()	smp_mb()
+#define smp_mb__before_atomic_inc()	smp_mb()
+#define smp_mb__after_atomic_inc()	smp_mb()
 
 /*
  * 64-bit atomic operations.
@@ -180,7 +194,7 @@ static inline long atomic64_add_return(long i, atomic64_t *v)
 	unsigned long tmp;
 
 	asm volatile("// atomic64_add_return\n"
-"1:	ldxr	%0, %2\n"
+"1:	ldaxr	%0, %2\n"
 "	add	%0, %0, %3\n"
 "	stlxr	%w1, %0, %2\n"
 "	cbnz	%w1, 1b"
@@ -188,7 +202,6 @@ static inline long atomic64_add_return(long i, atomic64_t *v)
 	: "Ir" (i)
 	: "memory");
 
-	smp_mb();
 	return result;
 }
 
@@ -212,7 +225,7 @@ static inline long atomic64_sub_return(long i, atomic64_t *v)
 	unsigned long tmp;
 
 	asm volatile("// atomic64_sub_return\n"
-"1:	ldxr	%0, %2\n"
+"1:	ldaxr	%0, %2\n"
 "	sub	%0, %0, %3\n"
 "	stlxr	%w1, %0, %2\n"
 "	cbnz	%w1, 1b"
@@ -220,7 +233,6 @@ static inline long atomic64_sub_return(long i, atomic64_t *v)
 	: "Ir" (i)
 	: "memory");
 
-	smp_mb();
 	return result;
 }
 
@@ -229,20 +241,17 @@ static inline long atomic64_cmpxchg(atomic64_t *ptr, long old, long new)
 	long oldval;
 	unsigned long res;
 
-	smp_mb();
-
 	asm volatile("// atomic64_cmpxchg\n"
-"1:	ldxr	%1, %2\n"
+"1:	ldaxr	%1, %2\n"
 "	cmp	%1, %3\n"
 "	b.ne	2f\n"
-"	stxr	%w0, %4, %2\n"
+"	stlxr	%w0, %4, %2\n"
 "	cbnz	%w0, 1b\n"
 "2:"
 	: "=&r" (res), "=&r" (oldval), "+Q" (ptr->counter)
 	: "Ir" (old), "r" (new)
 	: "cc");
 
-	smp_mb();
 	return oldval;
 }
 
@@ -254,12 +263,11 @@ static inline long atomic64_dec_if_positive(atomic64_t *v)
 	unsigned long tmp;
 
 	asm volatile("// atomic64_dec_if_positive\n"
-"1:	ldxr	%0, %2\n"
+"1:	ldaxr	%0, %2\n"
 "	subs	%0, %0, #1\n"
 "	b.mi	2f\n"
 "	stlxr	%w1, %0, %2\n"
 "	cbnz	%w1, 1b\n"
-"	dmb	ish\n"
 "2:"
 	: "=&r" (result), "=&r" (tmp), "+Q" (v->counter)
 	:

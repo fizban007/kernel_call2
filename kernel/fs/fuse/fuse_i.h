@@ -115,8 +115,6 @@ struct fuse_inode {
 enum {
 	/** Advise readdirplus  */
 	FUSE_I_ADVISE_RDPLUS,
-	/** An operation changing file size is in progress  */
-	FUSE_I_SIZE_UNSTABLE,
 };
 
 struct fuse_conn;
@@ -347,6 +345,9 @@ struct fuse_req {
 
 	/** Inode used in the request or NULL */
 	struct inode *inode;
+
+	/** Path used for completing d_canonical_path */
+	struct path *canonical_path;
 
 	/** AIO control block */
 	struct fuse_io_priv *io;

@@ -232,22 +232,21 @@ source "net/batman-adv/Kconfig"
 source "net/openvswitch/Kconfig"
 source "net/vmw_vsock/Kconfig"
 source "net/netlink/Kconfig"
-source "net/rmnet_data/Kconfig"
 
 config RPS
-	boolean
-	depends on SMP && SYSFS
+	boolean "RPS"
+	depends on SMP && SYSFS && USE_GENERIC_SMP_HELPERS
 	default y
 
 config RFS_ACCEL
 	boolean
-	depends on RPS
+	depends on RPS && GENERIC_HARDIRQS
 	select CPU_RMAP
 	default y
 
 config XPS
 	boolean
-	depends on SMP
+	depends on SMP && USE_GENERIC_SMP_HELPERS
 	default y
 
 config NETPRIO_CGROUP
@@ -273,15 +272,6 @@ config BPF_JIT
 	  code when filter is loaded in memory. This should speedup
 	  packet sniffing (libpcap/tcpdump). Note : Admin should enable
 	  this feature changing /proc/sys/net/core/bpf_jit_enable
-
-config SOCKEV_NLMCAST
-	bool "Enable SOCKEV Netlink Multicast"
-	default n
-	---help---
-	  Default client for SOCKEV notifier events. Sends multicast netlink
-	  messages whenever the socket event notifier is invoked. Enable if
-	  user space entities need to be notified of socket events without
-	  having to poll /proc
 
 menu "Network testing"
 
@@ -360,7 +350,6 @@ source "net/9p/Kconfig"
 source "net/caif/Kconfig"
 source "net/ceph/Kconfig"
 source "net/nfc/Kconfig"
-source "net/ipc_router/Kconfig"
 
 
 endif   # if NET

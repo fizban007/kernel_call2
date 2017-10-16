@@ -15,14 +15,30 @@
 #include <asm/cpu-features.h>
 #include <asm/watch.h>
 #include <asm/dsp.h>
+#include <asm/mmu_context.h>
+#include <asm/msa.h>
 
 struct task_struct;
 
-/*
- * switch_to(n) should switch tasks to task nr n, first
- * checking that n isn't the current task, in which case it does nothing.
+enum {
+	FP_SAVE_NONE	= 0,
+	FP_SAVE_VECTOR	= -1,
+	FP_SAVE_SCALAR	= 1,
+};
+
+/**
+ * resume - resume execution of a task
+ * @prev:	The task previously executed.
+ * @next:	The task to begin executing.
+ * @next_ti:	task_thread_info(next).
+ * @fp_save:	Which, if any, FP context to save for prev.
+ *
+ * This function is used whilst scheduling to save the context of prev & load
+ * the context of next. Returns prev.
  */
-extern asmlinkage void *resume(void *last, void *next, void *next_ti, u32 __usedfpu);
+extern asmlinkage struct task_struct *resume(struct task_struct *prev,
+		struct task_struct *next, struct thread_info *next_ti,
+		s32 fp_save);
 
 extern unsigned int ll_bit;
 extern struct task_struct *ll_task;
@@ -58,22 +74,44 @@ do {									\
 #define __mips_mt_fpaff_switch_to(prev) do { (void) (prev); } while (0)
 #endif
 
-#define __clear_software_ll_bit()					\
+#ifdef CONFIG_CPU_MIPSR6
+#define __clear_ll_bit()                                                \
+do {									\
+	write_c0_lladdr(0);                                             \
+} while (0)
+#else
+#define __clear_ll_bit()                                                \
 do {									\
 	if (!__builtin_constant_p(cpu_has_llsc) || !cpu_has_llsc)	\
 		ll_bit = 0;						\
 } while (0)
+#endif
 
 #define switch_to(prev, next, last)					\
 do {									\
-	u32 __usedfpu;							\
+	s32 __fpsave = FP_SAVE_NONE;					\
 	__mips_mt_fpaff_switch_to(prev);				\
 	if (cpu_has_dsp)						\
 		__save_dsp(prev);					\
-	__clear_software_ll_bit();					\
-	__usedfpu = test_and_clear_tsk_thread_flag(prev, TIF_USEDFPU);	\
-	(last) = resume(prev, next, task_thread_info(next), __usedfpu); \
+	__clear_ll_bit();                                               \
+	if (test_and_clear_tsk_thread_flag(prev, TIF_USEDFPU))		\
+		__fpsave = FP_SAVE_SCALAR;				\
+	if (test_and_clear_tsk_thread_flag(prev, TIF_USEDMSA))		\
+		__fpsave = FP_SAVE_VECTOR;				\
+	(last) = resume(prev, next, task_thread_info(next), __fpsave);	\
 } while (0)
+
+static inline void flush_vdso_page(void)
+{
+	int cpu = raw_smp_processor_id();
+
+	if (current->mm && cpu_context(cpu, current->mm) &&
+	    (current->mm->context.vdso_page[cpu] != current_thread_info()->vdso_page) &&
+	    (current->mm->context.vdso_asid[cpu] == cpu_asid(cpu, current->mm))) {
+		local_flush_tlb_page(current->mm->mmap, (unsigned long)current->mm->context.vdso);
+		current->mm->context.vdso_asid[cpu] = 0;
+	}
+}
 
 #define finish_arch_switch(prev)					\
 do {									\
@@ -81,6 +119,7 @@ do {									\
 		__restore_dsp(current);					\
 	if (cpu_has_userlocal)						\
 		write_c0_userlocal(current_thread_info()->tp_value);	\
+	flush_vdso_page();                                              \
 	__restore_watch();						\
 } while (0)
 

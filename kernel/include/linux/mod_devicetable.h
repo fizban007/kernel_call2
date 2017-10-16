@@ -282,7 +282,7 @@ struct pcmcia_device_id {
 #define INPUT_DEVICE_ID_LED_MAX		0x0f
 #define INPUT_DEVICE_ID_SND_MAX		0x07
 #define INPUT_DEVICE_ID_FF_MAX		0x7f
-#define INPUT_DEVICE_ID_SW_MAX		0x20
+#define INPUT_DEVICE_ID_SW_MAX		0x0f
 
 #define INPUT_DEVICE_ID_MATCH_BUS	1
 #define INPUT_DEVICE_ID_MATCH_VENDOR	2
@@ -431,24 +431,6 @@ struct spi_device_id {
 	kernel_ulong_t driver_data;	/* Data private to the driver */
 };
 
-#define SLIMBUS_NAME_SIZE	32
-#define SLIMBUS_MODULE_PREFIX "slim:"
-
-struct slim_device_id {
-	char name[SLIMBUS_NAME_SIZE];
-	kernel_ulong_t driver_data	/* Data private to the driver */
-			__attribute__((aligned(sizeof(kernel_ulong_t))));
-};
-
-#define SPMI_NAME_SIZE	32
-#define SPMI_MODULE_PREFIX "spmi:"
-
-struct spmi_device_id {
-	char name[SPMI_NAME_SIZE];
-	kernel_ulong_t driver_data	/* Data private to the driver */
-			__attribute__((aligned(sizeof(kernel_ulong_t))));
-};
-
 /* dmi */
 enum dmi_field {
 	DMI_NONE,
@@ -474,8 +456,7 @@ enum dmi_field {
 };
 
 struct dmi_strmatch {
-	unsigned char slot:7;
-	unsigned char exact_match:1;
+	unsigned char slot;
 	char substr[79];
 };
 
@@ -493,8 +474,7 @@ struct dmi_system_id {
  */
 #define dmi_device_id dmi_system_id
 
-#define DMI_MATCH(a, b)	{ .slot = a, .substr = b }
-#define DMI_EXACT_MATCH(a, b)	{ .slot = a, .substr = b, .exact_match = 1 }
+#define DMI_MATCH(a, b)	{ a, b }
 
 #define PLATFORM_NAME_SIZE	20
 #define PLATFORM_MODULE_PREFIX	"platform:"

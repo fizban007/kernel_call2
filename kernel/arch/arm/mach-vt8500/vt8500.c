@@ -22,7 +22,6 @@
 #include <linux/io.h>
 #include <linux/irqchip.h>
 #include <linux/pm.h>
-#include <linux/reboot.h>
 
 #include <asm/mach-types.h>
 #include <asm/mach/arch.h>
@@ -48,7 +47,7 @@
 
 static void __iomem *pmc_base;
 
-void vt8500_restart(enum reboot_mode mode, const char *cmd)
+void vt8500_restart(char mode, const char *cmd)
 {
 	if (pmc_base)
 		writel(1, pmc_base + VT8500_PMSR_REG);

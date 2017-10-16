@@ -51,14 +51,14 @@ void arch_cpu_idle(void)
 	local_irq_enable();
 }
 
-static enum reboot_mode reboot_mode = REBOOT_HARD;
+static char reboot_mode = 'h';
 
 int __init reboot_setup(char *str)
 {
-	if ('s' == str[0])
-		reboot_mode = REBOOT_SOFT;
+	reboot_mode = str[0];
 	return 1;
 }
+
 __setup("reboot=", reboot_setup);
 
 void machine_halt(void)
@@ -88,7 +88,7 @@ void machine_restart(char *cmd)
 	 * we may need it to insert some 1:1 mappings so that
 	 * soft boot works.
 	 */
-	setup_mm_for_reboot();
+	setup_mm_for_reboot(reboot_mode);
 
 	/* Clean and invalidate caches */
 	flush_cache_all();
@@ -102,7 +102,7 @@ void machine_restart(char *cmd)
 	/*
 	 * Now handle reboot code.
 	 */
-	if (reboot_mode == REBOOT_SOFT) {
+	if (reboot_mode == 's') {
 		/* Jump into ROM at address 0xffff0000 */
 		cpu_reset(VECTORS_BASE);
 	} else {

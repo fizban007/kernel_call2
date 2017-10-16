@@ -14,6 +14,7 @@
 #include <linux/suspend.h>
 #include <linux/seq_file.h>
 #include <linux/debugfs.h>
+#include <linux/types.h>
 #include <trace/events/power.h>
 
 #include "power.h"
@@ -52,6 +53,8 @@ static void pm_wakeup_timer_fn(unsigned long data);
 static LIST_HEAD(wakeup_sources);
 
 static DECLARE_WAIT_QUEUE_HEAD(wakeup_count_wait_queue);
+
+static ktime_t last_read_time;
 
 /**
  * wakeup_source_prepare - Prepare a new wakeup source for initialization.
@@ -342,6 +345,20 @@ int device_set_wakeup_enable(struct device *dev, bool enable)
 }
 EXPORT_SYMBOL_GPL(device_set_wakeup_enable);
 
+/**
+ * wakeup_source_not_registered - validate the given wakeup source.
+ * @ws: Wakeup source to be validated.
+ */
+static bool wakeup_source_not_registered(struct wakeup_source *ws)
+{
+	/*
+	 * Use timer struct to check if the given source is initialized
+	 * by wakeup_source_add.
+	 */
+	return ws->timer.function != pm_wakeup_timer_fn ||
+		   ws->timer.data != (unsigned long)ws;
+}
+
 /*
  * The functions below use the observation that each wakeup event starts a
  * period in which the system should not be suspended.  The moment this period
@@ -381,6 +398,10 @@ EXPORT_SYMBOL_GPL(device_set_wakeup_enable);
 static void wakeup_source_activate(struct wakeup_source *ws)
 {
 	unsigned int cec;
+
+	if (WARN(wakeup_source_not_registered(ws),
+			"unregistered wakeup source\n"))
+		return;
 
 	/*
 	 * active wakeup source should bring the system
@@ -467,10 +488,6 @@ static void update_prevent_sleep_time(struct wakeup_source *ws, ktime_t now)
 {
 	ktime_t delta = ktime_sub(now, ws->start_prevent_time);
 	ws->prevent_sleep_time = ktime_add(ws->prevent_sleep_time, delta);
-#ifdef CONFIG_HUAWEI_KERNEL
-	ws->screen_off_time = ktime_add(ws->screen_off_time, delta);
-#endif
-
 }
 #else
 static inline void update_prevent_sleep_time(struct wakeup_source *ws,
@@ -663,6 +680,37 @@ void pm_wakeup_event(struct device *dev, unsigned int msec)
 }
 EXPORT_SYMBOL_GPL(pm_wakeup_event);
 
+void pm_get_active_wakeup_sources(char *pending_wakeup_source, size_t max)
+{
+	struct wakeup_source *ws, *last_active_ws = NULL;
+	int len = 0;
+	bool active = false;
+
+	rcu_read_lock();
+	list_for_each_entry_rcu(ws, &wakeup_sources, entry) {
+		if (ws->active && len < max) {
+			if (!active)
+				len += scnprintf(pending_wakeup_source, max,
+						"Pending Wakeup Sources: ");
+			len += scnprintf(pending_wakeup_source + len, max - len,
+				"%s ", ws->name);
+			active = true;
+		} else if (!active &&
+			   (!last_active_ws ||
+			    ktime_to_ns(ws->last_time) >
+			    ktime_to_ns(last_active_ws->last_time))) {
+			last_active_ws = ws;
+		}
+	}
+	if (!active && last_active_ws) {
+		scnprintf(pending_wakeup_source, max,
+				"Last active Wakeup Source: %s",
+				last_active_ws->name);
+	}
+	rcu_read_unlock();
+}
+EXPORT_SYMBOL_GPL(pm_get_active_wakeup_sources);
+
 static void print_active_wakeup_sources(void)
 {
 	struct wakeup_source *ws;
@@ -729,20 +777,17 @@ bool pm_wakeup_pending(void)
  * Return 'false' if the current number of wakeup events being processed is
  * nonzero.  Otherwise return 'true'.
  */
-
-#ifdef CONFIG_HUAWEI_KERNEL
-extern void print_all_active_wakeup_source(void);
-#endif
 bool pm_get_wakeup_count(unsigned int *count, bool block)
 {
 	unsigned int cnt, inpr;
-
-#ifdef CONFIG_HUAWEI_KERNEL
-	print_all_active_wakeup_source();
-#endif
+	unsigned long flags;
 
 	if (block) {
 		DEFINE_WAIT(wait);
+
+		spin_lock_irqsave(&events_lock, flags);
+		last_read_time = ktime_get();
+		spin_unlock_irqrestore(&events_lock, flags);
 
 		for (;;) {
 			prepare_to_wait(&wakeup_count_wait_queue, &wait,
@@ -775,6 +820,7 @@ bool pm_save_wakeup_count(unsigned int count)
 {
 	unsigned int cnt, inpr;
 	unsigned long flags;
+	struct wakeup_source *ws;
 
 	events_check_enabled = false;
 	spin_lock_irqsave(&events_lock, flags);
@@ -782,6 +828,15 @@ bool pm_save_wakeup_count(unsigned int count)
 	if (cnt == count && inpr == 0) {
 		saved_count = count;
 		events_check_enabled = true;
+	} else {
+		rcu_read_lock();
+		list_for_each_entry_rcu(ws, &wakeup_sources, entry) {
+			if (ws->active ||
+			    ktime_compare(ws->last_time, last_read_time) > 0) {
+				ws->wakeup_count++;
+			}
+		}
+		rcu_read_unlock();
 	}
 	spin_unlock_irqrestore(&events_lock, flags);
 	return events_check_enabled;
@@ -808,11 +863,6 @@ void pm_wakep_autosleep_enabled(bool set)
 				else
 					update_prevent_sleep_time(ws, now);
 			}
-#ifdef CONFIG_HUAWEI_KERNEL
-			if (set) { // screen off
-				ws->screen_off_time = ktime_set(0, 0);
-			}
-#endif
 		}
 		spin_unlock_irq(&ws->lock);
 	}
@@ -836,9 +886,6 @@ static int print_wakeup_source_stats(struct seq_file *m,
 	unsigned long active_count;
 	ktime_t active_time;
 	ktime_t prevent_sleep_time;
-#ifdef CONFIG_HUAWEI_KERNEL
-	ktime_t screen_off_time;
-#endif
 	int ret;
 
 	spin_lock_irqsave(&ws->lock, flags);
@@ -846,9 +893,6 @@ static int print_wakeup_source_stats(struct seq_file *m,
 	total_time = ws->total_time;
 	max_time = ws->max_time;
 	prevent_sleep_time = ws->prevent_sleep_time;
-#ifdef CONFIG_HUAWEI_KERNEL
-	screen_off_time = ws->screen_off_time;
-#endif
 	active_count = ws->active_count;
 	if (ws->active) {
 		ktime_t now = ktime_get();
@@ -858,32 +902,13 @@ static int print_wakeup_source_stats(struct seq_file *m,
 		if (active_time.tv64 > max_time.tv64)
 			max_time = active_time;
 
-#ifdef CONFIG_HUAWEI_KERNEL
-		if (ws->autosleep_enabled) {
-			prevent_sleep_time = ktime_add(prevent_sleep_time,
-				ktime_sub(now, ws->start_prevent_time));
-			screen_off_time = ktime_add(screen_off_time,
-				ktime_sub(now, ws->start_prevent_time));
-		}
-#else
 		if (ws->autosleep_enabled)
 			prevent_sleep_time = ktime_add(prevent_sleep_time,
 				ktime_sub(now, ws->start_prevent_time));
-#endif
 	} else {
 		active_time = ktime_set(0, 0);
 	}
 
-#ifdef CONFIG_HUAWEI_KERNEL
-	ret = seq_printf(m, "%-12s\t%lu\t\t%lu\t\t%lu\t\t%lu\t\t"
-			"%lld\t\t%lld\t\t%lld\t\t%lld\t\t%lld\t\t%lld\n",
-			ws->name, active_count, ws->event_count,
-			ws->wakeup_count, ws->expire_count,
-			ktime_to_ms(active_time), ktime_to_ms(total_time),
-			ktime_to_ms(max_time), ktime_to_ms(ws->last_time),
-			ktime_to_ms(prevent_sleep_time),
-			ktime_to_ms(screen_off_time));
-#else
 	ret = seq_printf(m, "%-12s\t%lu\t\t%lu\t\t%lu\t\t%lu\t\t"
 			"%lld\t\t%lld\t\t%lld\t\t%lld\t\t%lld\n",
 			ws->name, active_count, ws->event_count,
@@ -891,138 +916,11 @@ static int print_wakeup_source_stats(struct seq_file *m,
 			ktime_to_ms(active_time), ktime_to_ms(total_time),
 			ktime_to_ms(max_time), ktime_to_ms(ws->last_time),
 			ktime_to_ms(prevent_sleep_time));
-#endif
 
 	spin_unlock_irqrestore(&ws->lock, flags);
 
 	return ret;
 }
-
-#ifdef CONFIG_HUAWEI_KERNEL
-/**
- * print_wakeup_source_stats - Print wakeup source statistics information.
- * @m: seq_file to print the statistics into.
- * @ws: Wakeup source object to print the statistics for.
- */
-static void print_one_active_wakeup_source(struct wakeup_source *ws)
-{
-	unsigned long flags;
-	ktime_t total_time;
-	ktime_t max_time;
-	unsigned long active_count;
-	ktime_t active_time;
-	ktime_t prevent_sleep_time;
-
-	spin_lock_irqsave(&ws->lock, flags);
-
-	total_time = ws->total_time;
-	max_time = ws->max_time;
-	prevent_sleep_time = ws->prevent_sleep_time;
-	active_count = ws->active_count;
-	if (ws->active) {
-		ktime_t now = ktime_get();
-
-		active_time = ktime_sub(now, ws->last_time);
-		total_time = ktime_add(total_time, active_time);
-		if (active_time.tv64 > max_time.tv64)
-			max_time = active_time;
-
-		if (ws->autosleep_enabled)
-			prevent_sleep_time = ktime_add(prevent_sleep_time,
-				ktime_sub(now, ws->start_prevent_time));
-	} else {
-		active_time = ktime_set(0, 0);
-	}
-
-	if(ws->active)
-	{
-		printk( "Active resource: %-12s\t%lu\t\t%lu\t\t%lu\t\t%lu\t\t"
-				"%lld\t\t%lld\t\t%lld\t\t%lld\t\t%lld\n",
-				ws->name, active_count, ws->event_count,
-				ws->wakeup_count, ws->expire_count,
-				ktime_to_ms(active_time), ktime_to_ms(total_time),
-				ktime_to_ms(max_time), ktime_to_ms(ws->last_time),
-				ktime_to_ms(prevent_sleep_time));
-	}
-
-	spin_unlock_irqrestore(&ws->lock, flags);
-
-	return;
-}
-
-/**
- * print_wakeup_source_stats - Print wakeup source statistics information.
- * @m: seq_file to print the statistics into.
- * @ws: Wakeup source object to print the statistics for.
- */
-void print_all_active_wakeup_source(void)
-{
-    struct wakeup_source *ws;
-
-	printk("name\t\tactive_count\tevent_count\twakeup_count\t"
-	"expire_count\tactive_since\ttotal_time\tmax_time\t"
-	"last_change\tprevent_suspend_time\n");
-
-	rcu_read_lock();
-	list_for_each_entry_rcu(ws, &wakeup_sources, entry)
-		print_one_active_wakeup_source(ws);
-	rcu_read_unlock();
-}
-
-/**
- * print_wakeup_source_stats - Print wakeup source statistics information.
- * @m: seq_file to print the statistics into.
- * @ws: Wakeup source object to print the statistics for.
- */
-static int print_active_wakeup_source(struct seq_file *m,
-				     struct wakeup_source *ws)
-{
-	unsigned long flags;
-	ktime_t total_time;
-	ktime_t max_time;
-	unsigned long active_count;
-	ktime_t active_time;
-	ktime_t prevent_sleep_time;
-	int ret = 0;
-
-	spin_lock_irqsave(&ws->lock, flags);
-
-	total_time = ws->total_time;
-	max_time = ws->max_time;
-	prevent_sleep_time = ws->prevent_sleep_time;
-	active_count = ws->active_count;
-	if (ws->active) {
-		ktime_t now = ktime_get();
-
-		active_time = ktime_sub(now, ws->last_time);
-		total_time = ktime_add(total_time, active_time);
-		if (active_time.tv64 > max_time.tv64)
-			max_time = active_time;
-
-		if (ws->autosleep_enabled)
-			prevent_sleep_time = ktime_add(prevent_sleep_time,
-				ktime_sub(now, ws->start_prevent_time));
-	} else {
-		active_time = ktime_set(0, 0);
-	}
-
-	if(ws->active)
-	{
-		ret = seq_printf(m, "Active resource: %-12s\t%lu\t\t%lu\t\t%lu\t\t%lu\t\t"
-				"%lld\t\t%lld\t\t%lld\t\t%lld\t\t%lld\n",
-				ws->name, active_count, ws->event_count,
-				ws->wakeup_count, ws->expire_count,
-				ktime_to_ms(active_time), ktime_to_ms(total_time),
-				ktime_to_ms(max_time), ktime_to_ms(ws->last_time),
-				ktime_to_ms(prevent_sleep_time));
-	}
-
-	spin_unlock_irqrestore(&ws->lock, flags);
-
-	return ret;
-}
-
-#endif
 
 /**
  * wakeup_sources_stats_show - Print wakeup sources statistics information.
@@ -1032,23 +930,13 @@ static int wakeup_sources_stats_show(struct seq_file *m, void *unused)
 {
 	struct wakeup_source *ws;
 
-#ifdef CONFIG_HUAWEI_KERNEL
-	seq_puts(m, "name\t\tactive_count\tevent_count\twakeup_count\t"
-		"expire_count\tactive_since\ttotal_time\tmax_time\t"
-		"last_change\tprevent_suspend_time\tscreen_off_time\n");
-#else
 	seq_puts(m, "name\t\tactive_count\tevent_count\twakeup_count\t"
 		"expire_count\tactive_since\ttotal_time\tmax_time\t"
 		"last_change\tprevent_suspend_time\n");
-#endif
 
 	rcu_read_lock();
 	list_for_each_entry_rcu(ws, &wakeup_sources, entry)
 		print_wakeup_source_stats(m, ws);
-#ifdef CONFIG_HUAWEI_KERNEL
-	list_for_each_entry_rcu(ws, &wakeup_sources, entry)
-		print_active_wakeup_source(m, ws);
-#endif
 	rcu_read_unlock();
 
 	return 0;
