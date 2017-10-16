@@ -6,6 +6,8 @@
  * Adapted from Fall 2016 solution
  *
  */
+#define DEBUG_MODE
+
 #include <fcntl.h>
 #include <math.h>
 #include <stdio.h>
@@ -93,9 +95,11 @@ int main(int argc, char **argv)
 	 * TODO: Implement your code to make this process a daemon in
 	 * daemon_mode function
 	 */
+
 	/*
 	daemon_mode();
 	*/
+
 	printf("Opening sensors...\n");
 	if (open_sensors(&sensors_module,
 			 &sensors_device) < 0) {
@@ -124,8 +128,12 @@ emulation:
 			printf("Error: failed to sleep.\n");
 			break;
 		}
+		#ifdef DEBUG_MODE
 		printf("slept for: %d ms\n", TIME_INTERVAL);
+		#endif
+		
 		break; /* to test 249 only */
+
 	}
 
 	return EXIT_SUCCESS;
@@ -144,12 +152,14 @@ static int poll_sensor_data(struct sensors_poll_device_t *sensors_device)
 		 * TODO: You have the acceleration here - 
 		 * scale it and send it to your kernel
 		 */
-		
+
+		#ifdef DEBUG_MODE
 		printf("line 147 reached.\n");
 		printf("cur_acceleration->x: %d\n", cur_acceleration->x);
 		printf("cur_acceleration->y: %d\n", cur_acceleration->y);
 		printf("cur_acceleration->z: %d\n", cur_acceleration->z);
-	
+		#endif
+
 		/* err = syscall(252, cur_acceleration);*/
 		err = syscall(249, cur_acceleration);
 		if(err){
@@ -164,6 +174,12 @@ static int poll_sensor_data(struct sensors_poll_device_t *sensors_device)
 		ssize_t count = sensors_device->poll(sensors_device,
 						buffer,
 						buf_size);
+		cur_acceleration = (struct dev_acceleration *)
+					malloc(sizeof(struct dev_acceleration));
+		if(!cur_acceleration) {
+			fprintf(stderr, "error: %s\n", strerror(errno));
+			exit(1);
+		}
 		/*
 		 * TODO: You have the acceleration here - scale it and
 		 * send it to kernel
@@ -179,6 +195,10 @@ static int poll_sensor_data(struct sensors_poll_device_t *sensors_device)
 			count--;
 		}
 
+		#ifdef DEBUG_MODE
+		printf("found sensor at count: %d", count);
+		#endif
+
 		if(count < 0) { /* Failed to find event with accelerometer handler # */
 			err = 1;
 			printf("Failed to locate sensor using handler in buffer\n");
@@ -187,8 +207,15 @@ static int poll_sensor_data(struct sensors_poll_device_t *sensors_device)
 			cur_acceleration->x = (int) ((buffer[count-1].acceleration.x)*100);
 			cur_acceleration->y = (int) ((buffer[count-1].acceleration.y)*100);
 			cur_acceleration->z = (int) ((buffer[count-1].acceleration.z)*100);
-			
-			err = syscall(252, cur_acceleration);
+
+			#ifdef DEBUG_MODE
+			printf("cur_x is %d", cur_acceleration->x);
+			printf("cur_y is %d", cur_acceleration->y);
+			printf("cur_z is %d", cur_acceleration->z);
+			#endif
+					
+			/* err = syscall(252, cur_acceleration);*/
+			err = syscall(249, cur_acceleration);
 			if(err)
 				printf("Error: accevt_signal failed\n");
 		}
